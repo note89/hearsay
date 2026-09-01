@@ -31,6 +31,19 @@ expect(errorSegments.filter { $0.verdict == .wrong }.map(\.text) == ["cash"], "d
 let listSegments = Scorer.diff(reference: "a list: one two", hypothesis: "a list:\n- one\n- two")
 expect(listSegments.map(\.text).joined() == "a list:\n- one\n- two", "diff: newlines preserved")
 
+expect(Scorer.wer(reference: "music from the 90's era", hypothesis: "music from the 90's era") == 0, "digit-apostrophe-letter terminates")
+expect(Scorer.diff(reference: "the 90's", hypothesis: "the 90's").allSatisfy { $0.verdict == .match }, "diff survives 90's")
+expect(Scorer.wer(reference: "their deployment won't work there", hypothesis: "their deployment won\u{2019}t work there") == 0, "curly apostrophe contraction")
+expect(Scorer.wer(reference: "before Thursday's demo", hypothesis: "before Thursday\u{2019}s demo") == 0, "curly possessive")
+expect(Scorer.wer(reference: "say hello now", hypothesis: "say 'hello' now") == 0, "single-quote quoting")
+expect(Scorer.wer(reference: "hello", hypothesis: "' hello") == 0, "stray apostrophe token dropped")
+let pctSegments = Scorer.diff(reference: "fifty", hypothesis: "50%")
+expect(pctSegments.filter { $0.verdict == .wrong }.map(\.text) == ["50%"], "diff and wer agree on % insertion")
+for (r, h) in [("wait 5ms for HTTP/2", "wait five milliseconds for HTTP2"), ("plus 23% VAT", "plus twenty three percent VAT"), ("the 2nd option", "the second option")] {
+    expect(Scorer.wer(reference: r, hypothesis: h) == 0 && Scorer.diff(reference: r, hypothesis: h).allSatisfy { $0.verdict == .match }, "wer==0 implies clean diff: \(r)")
+}
+expect(Scorer.wer(reference: "the cache is stale", hypothesis: "the cache stale") > 0, "deletion still scores")
+
 if failures > 0 {
     print("\(failures) failing")
     exit(1)

@@ -41,20 +41,20 @@ public enum Scorer {
     // MARK: - Normalization
 
     static func normalize(_ text: String) -> [String] {
-        var t = text.lowercased()
-        t = regexReplace(t, pattern: #"(\d),(?=\d)"#, template: "$1")
-        t = t.replacingOccurrences(of: "%", with: " percent ")
-        t = regexReplace(t, pattern: #"[^\p{L}\p{N}\s']"#, template: " ")
-        return t.split(whereSeparator: \.isWhitespace).flatMap { normalizeToken(String($0)) }
+        text.split(whereSeparator: \.isWhitespace).flatMap { normalizeToken(String($0)) }
     }
 
     static func normalizeToken(_ raw: String) -> [String] {
         var token = raw.lowercased()
+        token = token.replacingOccurrences(of: "\u{2019}", with: "'")   // typographic apostrophes: engines emit them
+        token = token.replacingOccurrences(of: "\u{02BC}", with: "'")
+        token = token.replacingOccurrences(of: "%", with: " percent ")
         token = regexReplace(token, pattern: #"(\d),(?=\d)"#, template: "$1")
         token = regexReplace(token, pattern: #"[^\p{L}\p{N}\s']"#, template: " ")
         let pieces = token.split(whereSeparator: \.isWhitespace).map(String.init)
         if pieces.count != 1 { return pieces.flatMap { normalizeToken($0) } }
-        let t = pieces[0]
+        let t = pieces[0].trimmingCharacters(in: CharacterSet(charactersIn: "'"))   // contractions need interior apostrophes only
+        if t.isEmpty { return [] }
         if let expansion = Self.contractions[t] { return expansion.split(separator: " ").map(String.init) }
         if t.allSatisfy(\.isNumber), let n = Int(t) { return numberWords(n).split(separator: " ").map(String.init) }
         if let match = firstMatch(t, pattern: #"^(\d+)(st|nd|rd|th)$"#), let n = Int(match[1]) {
@@ -65,7 +65,8 @@ public enum Scorer {
         }
         if let unit = Self.units[t] { return [unit] }
         if t.contains(where: \.isLetter) && t.contains(where: \.isNumber) {
-            return splitLetterDigitBoundaries(t).flatMap { normalizeToken($0) }
+            let parts = splitLetterDigitBoundaries(t)
+            if parts.count > 1 { return parts.flatMap { normalizeToken($0) } }   // guard: never recurse on an unsplit token
         }
         return [t]
     }
@@ -173,7 +174,7 @@ public enum Scorer {
                 parts.append(current)
                 current = String(character)
             }
-            lastIsDigit = isDigit
+            if character.isLetter || character.isNumber { lastIsDigit = isDigit }   // punctuation must not mask a boundary
         }
         if !current.isEmpty { parts.append(current) }
         return parts
