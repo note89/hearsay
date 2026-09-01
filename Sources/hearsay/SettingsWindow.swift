@@ -95,15 +95,24 @@ private struct DictationPane: View {
             HStack {
                 Text("Language")
                 Spacer()
-                Picker("", selection: Binding(
-                    get: { coordinator.settings.locale.identifier },
-                    set: { identifier in coordinator.select(locale: Locale(identifier: identifier)) }
-                )) {
-                    ForEach(coordinator.availableLocales, id: \.identifier) { locale in
-                        Text(locale.displayName).tag(locale.identifier)
+                if coordinator.settings.engine.needsLocale {
+                    Picker("", selection: Binding(
+                        get: { coordinator.settings.locale.language.languageCode?.identifier ?? coordinator.settings.locale.identifier },
+                        set: { code in
+                            if let choice = coordinator.languageChoices.first(where: { $0.language.languageCode?.identifier == code }) {
+                                coordinator.select(locale: choice)
+                            }
+                        }
+                    )) {
+                        ForEach(coordinator.languageChoices, id: \.identifier) { locale in
+                            Text(locale.languageDisplayName).tag(locale.language.languageCode?.identifier ?? locale.identifier)
+                        }
                     }
+                    .frame(width: 260)
+                } else {
+                    Text("automatic — \(coordinator.settings.engine.label) detects the language")
+                        .foregroundStyle(.secondary)
                 }
-                .frame(width: 260)
             }
             Toggle(isOn: Binding(
                 get: { coordinator.settings.fieldContextEnabled },

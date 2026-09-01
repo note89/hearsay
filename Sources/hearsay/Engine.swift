@@ -49,6 +49,11 @@ enum Engine: Equatable {
         }
     }
 
+    /// Only the Apple engine needs a locale; the cloud engines detect language themselves.
+    var needsLocale: Bool {
+        self == .appleLocal
+    }
+
     var requiredKey: String? {
         switch self {
         case .appleLocal: return nil

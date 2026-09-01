@@ -66,8 +66,8 @@ struct BakeoffPane: View {
                 let sentence = BakeoffScript.sentences[position]
                 Text("sentence \(position + 1) of \(BakeoffScript.sentences.count) · \(sentence.language)")
                     .font(.caption).foregroundStyle(.secondary)
-                if position > 0, BakeoffScript.sentences[position - 1].language != sentence.language {
-                    Label("switch hearsay language to \(sentence.language) — Wispr auto-detects", systemImage: "globe")
+                if position > 0, BakeoffScript.sentences[position - 1].language != sentence.language, coordinator.settings.engine.needsLocale {
+                    Label("switch hearsay language to \(Locale(identifier: sentence.language).languageDisplayName)", systemImage: "globe")
                         .font(.caption).foregroundStyle(.orange)
                 }
                 Text(sentence.text)

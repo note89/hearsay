@@ -154,6 +154,23 @@ final class Coordinator {
     private(set) var engine: EngineStatus = .preparing
     private(set) var gesture: GestureStatus = .stopped
     private(set) var availableLocales: [Locale] = []
+
+    /// One entry per language: the variant matching the user's region when the model list has it,
+    /// else a canonical default. Regional model variants are mechanism, not a user choice.
+    var languageChoices: [Locale] {
+        var byLanguage: [String: [Locale]] = [:]
+        for locale in availableLocales {
+            byLanguage[locale.language.languageCode?.identifier ?? locale.identifier, default: []].append(locale)
+        }
+        let userRegion = Locale.current.region?.identifier
+        let preferred = ["en": "en_US", "pt": "pt_PT", "sv": "sv_SE", "de": "de_DE", "fr": "fr_FR", "es": "es_ES", "it": "it_IT", "nl": "nl_NL", "zh": "zh_CN"]
+        return byLanguage.map { language, variants in
+            if let regional = variants.first(where: { $0.region?.identifier == userRegion }) { return regional }
+            if let canonical = preferred[language], let match = variants.first(where: { $0.identifier == canonical }) { return match }
+            return variants.sorted { $0.identifier < $1.identifier }[0]
+        }
+        .sorted { $0.languageDisplayName < $1.languageDisplayName }
+    }
     /// Set by the Bake-off pane's appear/disappear. Being in the pane IS bake-off mode.
     var bakeoffPaneVisible = false
     let settings = Settings()
@@ -645,5 +662,10 @@ extension Duration {
 extension Locale {
     var displayName: String {
         Locale.current.localizedString(forIdentifier: identifier) ?? identifier
+    }
+
+    var languageDisplayName: String {
+        guard let code = language.languageCode?.identifier else { return displayName }
+        return Locale.current.localizedString(forLanguageCode: code) ?? displayName
     }
 }

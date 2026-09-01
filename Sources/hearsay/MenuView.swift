@@ -15,12 +15,15 @@ struct MenuView: View {
             Text("last: \(timing.transcribe.milliseconds) ms transcribe · \(timing.polish.milliseconds) ms polish · \(timing.insert.milliseconds) ms insert")
         }
         Divider()
-        Menu("Language: \(coordinator.settings.locale.displayName)") {
-            ForEach(coordinator.availableLocales, id: \.identifier) { locale in
-                Button {
-                    coordinator.select(locale: locale)
-                } label: {
-                    Text(locale.identifier == coordinator.settings.locale.identifier ? "✓ \(locale.displayName)" : "    \(locale.displayName)")
+        if coordinator.settings.engine.needsLocale {
+            Menu("Language: \(coordinator.settings.locale.languageDisplayName)") {
+                ForEach(coordinator.languageChoices, id: \.identifier) { locale in
+                    Button {
+                        coordinator.select(locale: locale)
+                    } label: {
+                        let selected = locale.language.languageCode == coordinator.settings.locale.language.languageCode
+                        Text(selected ? "✓ \(locale.languageDisplayName)" : "    \(locale.languageDisplayName)")
+                    }
                 }
             }
         }
