@@ -30,8 +30,22 @@ public enum PolishVerdict: Sendable {
     case keepRaw(PolishRejection)
 }
 
+/// On-device reference material for a polish pass. Never uploaded: the polish model runs locally
+/// regardless of which transcription engine produced the spoken text.
+public struct PolishContext: Sendable {
+    public let fieldText: String?
+    public let terms: [String]
+
+    public static let none = PolishContext(fieldText: nil, terms: [])
+
+    public init(fieldText: String?, terms: [String]) {
+        self.fieldText = fieldText
+        self.terms = terms
+    }
+}
+
 public protocol Polisher {
-    func polish(_ spoken: String, style: WritingStyle) async -> PolishVerdict
+    func polish(_ spoken: String, style: WritingStyle, context: PolishContext) async -> PolishVerdict
 }
 
 /// DECISION_POLISH_GUARD (Nils, 2026-08-31): polish is intent-faithful, not word-faithful —

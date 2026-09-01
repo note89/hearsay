@@ -79,4 +79,26 @@ extension InsertionTarget {
         guard case .textElement(let element) = focused else { return nil }
         return element.string(kAXValueAttribute)
     }
+
+    /// A window of the field's text around the cursor — transcription context that never leaves the machine.
+    public func contextAroundCursor(maxChars: Int) -> String? {
+        guard case .textElement(let element) = focused,
+              let value = element.string(kAXValueAttribute), !value.isEmpty else { return nil }
+        let length = value.utf16.count
+        let caret: Int = {
+            var ref: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &ref) == .success,
+                  let ref, CFGetTypeID(ref) == AXValueGetTypeID() else { return length }
+            var range = CFRange()
+            guard AXValueGetValue((ref as! AXValue), .cfRange, &range) else { return length }
+            return min(max(Int(range.location), 0), length)
+        }()
+        let half = maxChars / 2
+        let start = max(0, caret - half)
+        let end = min(length, caret + half)
+        guard start < end,
+              let startIndex = String.Index(utf16Offset: start, in: value) as String.Index?,
+              let endIndex = String.Index(utf16Offset: end, in: value) as String.Index? else { return nil }
+        return String(value[startIndex..<endIndex])
+    }
 }

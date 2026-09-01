@@ -4,6 +4,7 @@ import AVFoundation
 import Bakeoff
 import History
 import Insertion
+import Lexicon
 import Observation
 import os
 import Overlay
@@ -16,11 +17,14 @@ import Utterance
 enum InsertableText {
     case polished(PolishedText, spoken: RawTranscript)
     case raw(RawTranscript)
+    /// Dictionary rewrites applied on top of one of the above.
+    case rewritten(text: String, spoken: String)
 
     var text: String {
         switch self {
         case .polished(let polished, _): return polished.text
         case .raw(let raw): return raw.text
+        case .rewritten(let text, _): return text
         }
     }
 
@@ -28,6 +32,7 @@ enum InsertableText {
         switch self {
         case .polished(_, let spoken): return spoken.text
         case .raw(let raw): return raw.text
+        case .rewritten(_, let spoken): return spoken
         }
     }
 }
@@ -39,6 +44,9 @@ struct SessionRules {
     let mode: AppMode
     let style: WritingStyle
     let polish: PolishMode
+    /// Field text around the cursor, captured at press. Feeds only the on-device polish model.
+    let fieldContext: String?
+    let lexicon: Lexicon
 }
 
 enum BakeoffTarget {
@@ -143,6 +151,7 @@ final class Coordinator {
     let settings = Settings()
     let history: HistoryStore
     let bakeoffLog: BakeoffLog
+    @ObservationIgnored private var dictionaryURL: URL!
 
     private static let settleDisplay: Duration = .milliseconds(1400)
     private static let bakeoffDisplay: Duration = .seconds(4)
@@ -169,6 +178,7 @@ final class Coordinator {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("hearsay")
         history = HistoryStore(directory: support)
+        dictionaryURL = support.appendingPathComponent("dictionary.txt")
         bakeoffLog = BakeoffLog(directory: support)
         bridge = ArenaBridge(directory: support)
         transcriber = SpeechAnalyzerTranscriber(locale: settings.locale)   // placeholder; bootstrap rebuilds from the persisted engine
@@ -211,6 +221,14 @@ final class Coordinator {
 
     func copy(record: DictationRecord) {
         Inserter.copyToClipboard(record.delivered)
+    }
+
+    func set(fieldContextEnabled: Bool) {
+        settings.fieldContextEnabled = fieldContextEnabled
+    }
+
+    func openDictionary() {
+        NSWorkspace.shared.open(Lexicon.ensureFile(at: dictionaryURL))
     }
 
     // MARK: - Engine
@@ -277,7 +295,16 @@ final class Coordinator {
             settle(.blockedSecure)
             return
         }
-        let rules = SessionRules(engine: settings.engine, mode: settings.mode, style: StyleInference.style(for: target), polish: settings.polish)
+        let armedTarget: InsertionTarget? = { if case .armed(let armed) = target { return armed }; return nil }()
+        let fieldContext = settings.fieldContextEnabled ? armedTarget?.contextAroundCursor(maxChars: 600) : nil
+        let rules = SessionRules(
+            engine: settings.engine,
+            mode: settings.mode,
+            style: StyleInference.style(for: target),
+            polish: settings.polish,
+            fieldContext: fieldContext,
+            lexicon: Lexicon.load(from: dictionaryURL)
+        )
         let run: Run
         if rules.mode == .bakeoff {
             if case .armed(let armed) = target, let baseline = armed.currentText() {
@@ -376,14 +403,18 @@ final class Coordinator {
             let polisher = self.polisher
             let style = session.rules.style
             let text = raw.text
+            let context = PolishContext(fieldText: session.rules.fieldContext, terms: session.rules.lexicon.terms)
             let verdict: PolishVerdict = await Self.race(timeout: Self.polishTimeout) { () -> PolishVerdict in
-                await polisher.polish(text, style: style)
+                await polisher.polish(text, style: style, context: context)
             } ?? PolishVerdict.keepRaw(.timeout)
             switch verdict {
             case .accept(let polished): delivered = .polished(polished, spoken: raw)
             case .keepRaw(let rejection): log.notice("finish: kept raw (\(String(describing: rejection), privacy: .public))")
             }
             timing.polish = clock.now - polishStart
+        }
+        if let rewritten = session.rules.lexicon.rewriteResult(of: delivered.text) {
+            delivered = .rewritten(text: rewritten, spoken: delivered.spoken)
         }
 
         switch session.run {

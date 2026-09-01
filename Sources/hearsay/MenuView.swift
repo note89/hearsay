@@ -37,6 +37,11 @@ struct MenuView: View {
             get: { coordinator.settings.polish == .local },
             set: { coordinator.set(polish: $0 ? .local : .off) }
         ))
+        Toggle("Field context — read around the cursor (on-device)", isOn: Binding(
+            get: { coordinator.settings.fieldContextEnabled },
+            set: { coordinator.set(fieldContextEnabled: $0) }
+        ))
+        Button("Dictionary…") { coordinator.openDictionary() }
         Toggle("Bake-off mode — watch Wispr, never insert", isOn: Binding(
             get: { coordinator.settings.mode == .bakeoff },
             set: { coordinator.set(mode: $0 ? .bakeoff : .dictate) }

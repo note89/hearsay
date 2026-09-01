@@ -66,6 +66,16 @@ Menu bar → Engine → **API Keys…** opens `~/Library/Application Support/hea
 chmod 600). Environment variables and an `export` line in `~/.zshrc` also work. Engines without a key show
 "needs key" in the menu and stay disabled. Note: ElevenLabs is *not* reachable via OpenRouter — separate key.
 
+## Field context & dictionary
+
+- **Field context** (menu toggle, default on): at press, hearsay reads ~600 chars around your cursor via
+  accessibility and hands them to the *on-device* polish model as terminology reference. Because polish always
+  runs locally, this context never leaves the Mac — even when a cloud transcription engine is selected. It is
+  never logged and never stored.
+- **Dictionary** (menu → Dictionary…): a plain text file, one entry per line. `mprocs` = prefer this exact
+  spelling; `mprox -> mprocs` = deterministic rewrite applied after polish (works even with polish off).
+  Entries are only ever added by you — hearsay never learns words behind your back.
+
 ## Where the decisions live
 
 - `Sources/Insertion/Inserter.swift` → `Inserter.strategies(for:)` — which insertion strategies, in which order, per target (`DECISION_INSERTION_POLICY`)

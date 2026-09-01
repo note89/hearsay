@@ -21,6 +21,7 @@ final class Settings {
         static let mode = "mode"
         static let engine = "engine"
         static let history = "historyEnabled"
+        static let fieldContext = "fieldContextEnabled"
     }
 
     private static let defaultLocale = "en-US"
@@ -45,6 +46,10 @@ final class Settings {
         didSet { UserDefaults.standard.set(historyEnabled, forKey: Key.history) }
     }
 
+    var fieldContextEnabled: Bool {
+        didSet { UserDefaults.standard.set(fieldContextEnabled, forKey: Key.fieldContext) }
+    }
+
     init() {
         let defaults = UserDefaults.standard
         locale = Locale(identifier: defaults.string(forKey: Key.locale) ?? Self.defaultLocale)
@@ -52,5 +57,6 @@ final class Settings {
         mode = AppMode(rawValue: defaults.string(forKey: Key.mode) ?? "") ?? .dictate
         engine = defaults.string(forKey: Key.engine).flatMap(Engine.init(wireKey:)) ?? .appleLocal
         historyEnabled = defaults.object(forKey: Key.history) as? Bool ?? true
+        fieldContextEnabled = defaults.object(forKey: Key.fieldContext) as? Bool ?? true
     }
 }

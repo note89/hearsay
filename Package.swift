@@ -13,9 +13,10 @@ let package = Package(
         .target(name: "History"),
         .target(name: "Overlay"),
         .target(name: "Bakeoff", dependencies: ["Insertion"]),
+        .target(name: "Lexicon"),
         .executableTarget(
             name: "hearsay",
-            dependencies: ["Utterance", "Audio", "Transcription", "Polish", "Insertion", "History", "Overlay", "Bakeoff"]
+            dependencies: ["Utterance", "Audio", "Transcription", "Polish", "Insertion", "History", "Overlay", "Bakeoff", "Lexicon"]
         ),
     ]
 )
