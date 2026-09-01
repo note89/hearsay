@@ -11,16 +11,10 @@ struct BakeoffPane: View {
         VStack(alignment: .leading, spacing: 16) {
             PaneHeaderShared(
                 title: "Bake-off",
-                subtitle: "Same audio, same key-up, one clock. Run Wispr Flow alongside — hearsay never inserts in this mode; it watches the box below for the rival's text."
+                subtitle: "Same audio, same key-up, one clock. Run Wispr Flow alongside. While this pane is front, dictations score instead of inserting — leave the pane and hearsay dictates normally."
             )
 
             HStack {
-                Toggle("Bake-off mode", isOn: Binding(
-                    get: { coordinator.settings.mode == .bakeoff },
-                    set: { coordinator.set(mode: $0 ? .bakeoff : .dictate) }
-                ))
-                .toggleStyle(.switch)
-                Spacer()
                 Menu("Engine: \(coordinator.settings.engine.label)") {
                     ForEach(Engine.all, id: \.wireKey) { engineOption in
                         Button(engineOption.label) { coordinator.select(engine: engineOption) }
@@ -28,13 +22,9 @@ struct BakeoffPane: View {
                     }
                 }
                 .frame(width: 280)
+                Spacer()
                 Button("Reset run", role: .destructive) { coordinator.bakeoff.resetRun() }
                     .disabled(coordinator.bakeoff.records.isEmpty)
-            }
-
-            if coordinator.settings.mode != .bakeoff {
-                Label("Bake-off mode is off — hearsay would insert into the box instead of scoring.", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
             }
 
             prompter
@@ -58,6 +48,8 @@ struct BakeoffPane: View {
             verdictLine
             resultRows
         }
+        .onAppear { coordinator.bakeoffPaneVisible = true }
+        .onDisappear { coordinator.bakeoffPaneVisible = false }
         .onChange(of: coordinator.bakeoff.records.count) { _, newCount in
             if newCount != lastCount {
                 arenaText = ""

@@ -37,8 +37,14 @@ enum InsertableText {
     }
 }
 
+/// Normal use inserts; the bake-off pane being front makes a session score instead.
+enum AppMode {
+    case dictate
+    case bakeoff
+}
+
 /// The rules a session runs under, snapshotted at press. Later settings changes
-/// (menu or arena control) cannot affect a session in flight.
+/// cannot affect a session in flight.
 struct SessionRules {
     let engine: Engine
     let mode: AppMode
@@ -148,6 +154,8 @@ final class Coordinator {
     private(set) var engine: EngineStatus = .preparing
     private(set) var gesture: GestureStatus = .stopped
     private(set) var availableLocales: [Locale] = []
+    /// Set by the Bake-off pane's appear/disappear. Being in the pane IS bake-off mode.
+    var bakeoffPaneVisible = false
     let settings = Settings()
     let history: HistoryStore
     let bakeoff: BakeoffStore
@@ -193,11 +201,6 @@ final class Coordinator {
     func select(engine chosen: Engine) {
         settings.engine = chosen
         rebuildTranscriber()
-    }
-
-    func set(mode: AppMode) {
-        settings.mode = mode
-        overlay.place(Self.placement(for: mode))
     }
 
     func set(polish: PolishMode) {
@@ -301,9 +304,10 @@ final class Coordinator {
         }
         let armedTarget: InsertionTarget? = { if case .armed(let armed) = target { return armed }; return nil }()
         let fieldContext = settings.fieldContextEnabled ? armedTarget?.contextAroundCursor(maxChars: 600) : nil
+        let mode: AppMode = (bakeoffPaneVisible && NSApp.isActive) ? .bakeoff : .dictate
         let rules = SessionRules(
             engine: settings.engine,
-            mode: settings.mode,
+            mode: mode,
             style: StyleInference.style(for: target),
             polish: settings.polish,
             fieldContext: fieldContext,
@@ -322,6 +326,7 @@ final class Coordinator {
             run = .dictate(target)
         }
 
+        overlay.place(Self.placement(for: rules.mode))
         let audio: AsyncStream<AVAudioPCMBuffer>
         do {
             audio = try capture.start { [weak self] level in
@@ -551,7 +556,6 @@ final class Coordinator {
     // MARK: - Bootstrap & bridge
 
     private func bootstrap() async {
-        overlay.place(Self.placement(for: settings.mode))
         polisher.prewarm()
         startGesture()
         rebuildTranscriber()
