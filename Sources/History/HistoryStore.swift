@@ -38,6 +38,8 @@ public final class HistoryStore {
     public init(directory: URL, cap: Int = 200) {
         fileURL = directory.appendingPathComponent("history.json")
         self.cap = cap
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
         records = load()
     }
 

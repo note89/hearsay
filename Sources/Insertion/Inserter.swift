@@ -14,7 +14,6 @@ public enum InsertionEvidence: Equatable, Sendable {
 }
 
 public enum InsertionBlock: Equatable, Sendable {
-    case secureField
     case accessibilityDenied
     case allStrategiesFailed
     case noFrontmostApp
@@ -24,8 +23,6 @@ public enum InsertionBlock: Equatable, Sendable {
 public enum InsertionOutcome: Equatable, Sendable {
     case inserted(via: InsertionStrategy, evidence: InsertionEvidence)
     case copiedToClipboard(InsertionBlock)
-    /// Nothing was typed, copied, or kept anywhere.
-    case blocked(InsertionBlock)
 }
 
 enum StrategyAttempt {
@@ -45,7 +42,9 @@ public enum Inserter {
     @MainActor
     public static func insert(_ text: String, into target: InsertionTarget) async -> InsertionOutcome {
         guard AXIsProcessTrusted() else { return copyToClipboard(text, because: .accessibilityDenied) }
-        if Arming.focusIsSecure() { return .blocked(.secureField) }
+        // Focus drifted onto a password field since press: never type there, but the text was
+        // dictated for a normal field, so it is kept like any other lost target.
+        if Arming.focusIsSecure() { return copyToClipboard(text, because: .targetLost) }
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == target.app.pid else {
             return copyToClipboard(text, because: .targetLost)
         }

@@ -64,7 +64,7 @@ struct MenuView: View {
         }
         switch coordinator.phase {
         case .idle, .settled:
-            return coordinator.bakeoffPaneVisible ? "bake-off pane open — dictations score, not insert" : "hold fn+shift to dictate"
+            return coordinator.bakeoffPaneVisible ? "bake-off pane open — dictating into it scores" : "hold fn+shift to dictate"
         case .listening: return "listening…"
         case .finishing(_, let step): return "\(step.label)…"
         }

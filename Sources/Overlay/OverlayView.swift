@@ -11,6 +11,13 @@ struct OverlayView: View {
             case .hidden:
                 EmptyView()
             case .listening(let partial):
+                if let badge = model.badge {
+                    Text(badge)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .overlay(Capsule().strokeBorder(Color.orange.opacity(0.6), lineWidth: 1))
+                }
                 Waveform(levels: model.levels)
                 Text(partial.isEmpty ? "listening…" : partial)
                     .foregroundStyle(partial.isEmpty ? Color.white.opacity(0.55) : Color.white)

@@ -11,24 +11,22 @@ public final class ElevenLabsTranscriber: Transcriber {
 
     public static var keyAvailable: Bool { KeyStore.value("ELEVEN_LABS_API_KEY") != nil }
 
-    private let localeHint: Locale
     private let key: String
 
-    /// nil when no ELEVEN_LABS_API_KEY is available.
-    public init?(locale: Locale) {
+    /// nil when no ELEVEN_LABS_API_KEY is available. Scribe detects the language itself.
+    public init?() {
         guard let key = KeyStore.value("ELEVEN_LABS_API_KEY") else { return nil }
         self.key = key
-        self.localeHint = locale
     }
 
     public func transcribe(_ audio: AsyncStream<AVAudioPCMBuffer>) -> AsyncThrowingStream<TranscriptionEvent, Error> {
-        let (locale, key) = (localeHint, key)
+        let key = key
         return AsyncThrowingStream { continuation in
             let task = Task.detached {
                 do {
                     var accumulator = WavAccumulator()
                     for await buffer in audio { try accumulator.append(buffer) }
-                    let text = try await Self.request(wav: accumulator.wavData(), locale: locale, key: key)
+                    let text = try await Self.request(wav: accumulator.wavData(), key: key)
                     continuation.yield(.final(RawTranscript(text: text.trimmingCharacters(in: .whitespacesAndNewlines))))
                     continuation.finish()
                 } catch {
@@ -39,7 +37,7 @@ public final class ElevenLabsTranscriber: Transcriber {
         }
     }
 
-    private static func request(wav: Data, locale: Locale, key: String) async throws -> String {
+    private static func request(wav: Data, key: String) async throws -> String {
         var request = URLRequest(url: URL(string: "https://api.elevenlabs.io/v1/speech-to-text")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 12
@@ -52,9 +50,6 @@ public final class ElevenLabsTranscriber: Transcriber {
             body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".data(using: .utf8)!)
         }
         field("model_id", modelID)
-        if let language = locale.language.languageCode?.identifier {
-            field("language_code", language)
-        }
         body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"utterance.wav\"\r\nContent-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
         body.append(wav)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)

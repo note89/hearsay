@@ -4,8 +4,7 @@ import SwiftUI
 
 struct BakeoffPane: View {
     let coordinator: Coordinator
-    @State private var arenaText = ""
-    @State private var lastCount = -1
+    @State private var fieldText = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -15,7 +14,7 @@ struct BakeoffPane: View {
             )
 
             HStack {
-                Menu("Engine: \(coordinator.settings.engine.label)") {
+                Menu("Engine: \(coordinator.activeEngine.label)\(coordinator.activeEngine == coordinator.settings.engine ? "" : " (needs key)")") {
                     ForEach(Engine.all, id: \.wireKey) { engineOption in
                         Button(engineOption.label) { coordinator.select(engine: engineOption) }
                             .disabled(!engineOption.isAvailable)
@@ -23,20 +22,24 @@ struct BakeoffPane: View {
                 }
                 .frame(width: 280)
                 Spacer()
-                Button("Reset run", role: .destructive) { coordinator.bakeoff.resetRun() }
-                    .disabled(coordinator.bakeoff.records.isEmpty)
+                Button("Retake last") { coordinator.bakeoff.deleteLast() }
+                    .disabled(coordinator.bakeoff.records.isEmpty || !idle)
+                Button("Archive & reset run") { coordinator.bakeoff.resetRun() }
+                    .disabled(coordinator.bakeoff.records.isEmpty || !idle)
+                Button("Delete all runs", role: .destructive) { coordinator.bakeoff.deleteAllRuns() }
+                    .disabled((coordinator.bakeoff.records.isEmpty && coordinator.bakeoff.archivedRunCount == 0) || !idle)
             }
 
             prompter
 
-            TextEditor(text: $arenaText)
+            TextEditor(text: $fieldText)
                 .font(.system(size: 15))
                 .frame(height: 90)
                 .scrollContentBackground(.hidden)
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .quaternarySystemFill)))
                 .overlay(alignment: .topLeading) {
-                    if arenaText.isEmpty {
+                    if fieldText.isEmpty {
                         Text("click here, hold fn+shift, read the sentence, release")
                             .foregroundStyle(.secondary)
                             .padding(.top, 14).padding(.leading, 14)
@@ -50,15 +53,20 @@ struct BakeoffPane: View {
         }
         .onAppear { coordinator.bakeoffPaneVisible = true }
         .onDisappear { coordinator.bakeoffPaneVisible = false }
-        .onChange(of: coordinator.bakeoff.records.count) { _, newCount in
-            if newCount != lastCount {
-                arenaText = ""
-                lastCount = newCount
-            }
+        .onChange(of: coordinator.bakeoff.records.count) { _, _ in
+            fieldText = ""   // a take landed (or was retaken): the box is ready for the next sentence
         }
     }
 
     private var position: Int { coordinator.bakeoff.records.count }
+
+    /// Run edits are only safe between sessions — a take in flight records into the run it started in.
+    private var idle: Bool {
+        switch coordinator.phase {
+        case .idle, .settled: return true
+        case .listening, .finishing: return false
+        }
+    }
 
     private var prompter: some View {
         VStack(alignment: .leading, spacing: 6) {

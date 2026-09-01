@@ -37,17 +37,10 @@ enum InsertableText {
     }
 }
 
-/// Normal use inserts; the bake-off pane being front makes a session score instead.
-enum AppMode {
-    case dictate
-    case bakeoff
-}
-
 /// The rules a session runs under, snapshotted at press. Later settings changes
 /// cannot affect a session in flight.
 struct SessionRules {
     let engine: Engine
-    let mode: AppMode
     let style: WritingStyle
     let polish: PolishMode
     /// Field text around the cursor, captured at press. Feeds only the on-device polish model.
@@ -55,14 +48,21 @@ struct SessionRules {
     let lexicon: Lexicon
 }
 
+/// Where a dictation goes, parsed from the arm result at press — secure fields are refused before this exists.
+enum DictationDestination {
+    case field(InsertionTarget)
+    case clipboardOnly
+}
+
 enum BakeoffTarget {
     case watchable(InsertionTarget, baseline: String)
     case unobservable(app: String)
 }
 
+/// What a session does with its text: the single representation of "dictate vs bake-off".
 enum Run {
-    case dictate(ArmResult)
-    case bakeoff(BakeoffTarget, expected: String?)
+    case dictate(DictationDestination)
+    case bakeoff(BakeoffTarget, expected: String?, runID: UUID)
 }
 
 enum FinishingStep {
@@ -94,13 +94,13 @@ enum SessionOutcome {
     case compared(InsertableText, ours: Duration, rival: RivalObservation, app: String)
     case nothingHeard
     case blockedSecure
-    case failed(reason: String, salvaged: String?)
+    case failed(reason: String, salvaged: String?, app: String)
 }
 
 enum EngineStatus: Equatable {
     case preparing
     case downloadingModel(Locale)
-    case ready(Locale)
+    case ready
     case failed(String)
 }
 
@@ -128,9 +128,10 @@ final class LiveSession {
 
     var appName: String {
         switch run {
-        case .dictate(let arm): return Coordinator.appName(of: arm)
-        case .bakeoff(.watchable(let target, _), _): return target.app.name
-        case .bakeoff(.unobservable(let app), _): return app
+        case .dictate(.field(let target)): return target.app.name
+        case .dictate(.clipboardOnly): return "—"
+        case .bakeoff(.watchable(let target, _), _, _): return target.app.name
+        case .bakeoff(.unobservable(let app), _, _): return app
         }
     }
 }
@@ -154,6 +155,9 @@ final class Coordinator {
     private(set) var engine: EngineStatus = .preparing
     private(set) var gesture: GestureStatus = .stopped
     private(set) var availableLocales: [Locale] = []
+    /// The engine sessions actually run on: the chosen one when its key is present, else Apple.
+    /// The user's choice in Settings is never overwritten by availability.
+    private(set) var activeEngine: Engine = .appleLocal
 
     /// One entry per language: the variant matching the user's region when the model list has it,
     /// else a canonical default. Regional model variants are mechanism, not a user choice.
@@ -184,6 +188,8 @@ final class Coordinator {
     private static let polishTimeout: Duration = .seconds(8)
     private static let rivalTimeout: Duration = .seconds(8)
     private static let gestureRetry: Duration = .seconds(3)
+    /// Field text handed to the on-device polish model as terminology reference; bounded for its context window.
+    private static let fieldContextMaxChars = 600
 
     @ObservationIgnored private lazy var overlay = OverlayPanel()
     @ObservationIgnored private let capture = MicrophoneCapture()
@@ -259,22 +265,25 @@ final class Coordinator {
     // MARK: - Engine
 
     private func rebuildTranscriber() {
-        var chosen = settings.engine
+        let chosen = settings.engine
+        var resolved = chosen
         if !chosen.isAvailable {
-            log.error("rebuildTranscriber: \(chosen.wireKey, privacy: .public) needs an API key — falling back to Apple")
-            chosen = .appleLocal
-            settings.engine = chosen
+            log.notice("rebuildTranscriber: \(chosen.wireKey, privacy: .public) needs an API key — running on Apple until it is added")
+            resolved = .appleLocal
         }
-        if let built = chosen.makeTranscriber(locale: settings.locale) {
+        if let built = resolved.makeTranscriber(locale: settings.locale) {
             transcriber = built
         } else {
-            chosen = .appleLocal
-            settings.engine = chosen
+            resolved = .appleLocal
             transcriber = SpeechAnalyzerTranscriber(locale: settings.locale)
         }
-        switch chosen {
-        case .appleLocal: reloadAppleModel()
-        case .openRouter, .elevenLabsScribe: engine = .ready(settings.locale)
+        activeEngine = resolved
+        switch resolved {
+        case .appleLocal:
+            reloadAppleModel()
+        case .openRouter, .elevenLabsScribe:
+            loadModelTask?.cancel()
+            engine = .ready
         }
     }
 
@@ -286,11 +295,11 @@ final class Coordinator {
             guard let self else { return }
             do {
                 try await SpeechAnalyzerTranscriber.ensureModel(for: locale)
-                guard !Task.isCancelled, locale == self.settings.locale, case .appleLocal = self.settings.engine else { return }
-                self.engine = .ready(locale)
+                guard !Task.isCancelled, locale == self.settings.locale, self.activeEngine == .appleLocal else { return }
+                self.engine = .ready
                 self.log.notice("loadModel: ready \(locale.identifier, privacy: .public)")
             } catch {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, locale == self.settings.locale, self.activeEngine == .appleLocal else { return }
                 self.log.error("loadModel: \(String(describing: error))")
                 self.engine = .failed("model download failed")
             }
@@ -309,7 +318,7 @@ final class Coordinator {
         settleTask?.cancel()
         guard case .ready = engine else {
             log.error("pressed: engine not ready")
-            settle(.failed(reason: "engine not ready", salvaged: nil))
+            settle(.failed(reason: "engine not ready", salvaged: nil, app: "—"))
             return
         }
 
@@ -320,30 +329,34 @@ final class Coordinator {
             return
         }
         let armedTarget: InsertionTarget? = { if case .armed(let armed) = target { return armed }; return nil }()
-        let fieldContext = settings.fieldContextEnabled ? armedTarget?.contextAroundCursor(maxChars: 600) : nil
-        let mode: AppMode = (bakeoffPaneVisible && NSApp.isActive) ? .bakeoff : .dictate
+        let polish = settings.polish
+        let fieldContext = (settings.fieldContextEnabled && polish != .off) ? armedTarget?.contextAroundCursor(maxChars: Self.fieldContextMaxChars) : nil
         let rules = SessionRules(
-            engine: settings.engine,
-            mode: mode,
+            engine: activeEngine,
             style: StyleInference.style(for: target),
-            polish: settings.polish,
+            polish: polish,
             fieldContext: fieldContext,
             lexicon: Lexicon.load(from: dictionaryURL)
         )
+        // Bake-off iff the text would land in our own pane: same arm() snapshot the session uses,
+        // so activation state and view lifecycle cannot disagree with it.
         let run: Run
-        if rules.mode == .bakeoff {
+        if let armed = armedTarget, armed.app.pid == ProcessInfo.processInfo.processIdentifier,
+           case .textElement = armed.focused, bakeoffPaneVisible {
             let position = bakeoff.records.count
             let expected = position < BakeoffScript.sentences.count ? BakeoffScript.sentences[position].text : nil
-            if case .armed(let armed) = target, let baseline = armed.currentText() {
-                run = .bakeoff(.watchable(armed, baseline: baseline), expected: expected)
+            if let baseline = armed.currentText() {
+                run = .bakeoff(.watchable(armed, baseline: baseline), expected: expected, runID: bakeoff.runID)
             } else {
-                run = .bakeoff(.unobservable(app: Self.appName(of: target)), expected: expected)
+                run = .bakeoff(.unobservable(app: armed.app.name), expected: expected, runID: bakeoff.runID)
             }
+        } else if let armed = armedTarget {
+            run = .dictate(.field(armed))
         } else {
-            run = .dictate(target)
+            run = .dictate(.clipboardOnly)
         }
-
-        overlay.place(Self.placement(for: rules.mode))
+        overlay.place(Self.placement(for: run))
+        overlay.setBadge(Self.badge(for: rules.engine))
         let audio: AsyncStream<AVAudioPCMBuffer>
         do {
             audio = try capture.start { [weak self] level in
@@ -351,7 +364,7 @@ final class Coordinator {
             }
         } catch {
             log.error("pressed: microphone failed: \(String(describing: error))")
-            settle(.failed(reason: "microphone failed", salvaged: nil))
+            settle(.failed(reason: "microphone failed", salvaged: nil, app: "—"))
             return
         }
 
@@ -378,7 +391,7 @@ final class Coordinator {
             return
         }
         capture.stop()
-        if case .bakeoff(.watchable(let target, let baseline), _) = session.run {
+        if case .bakeoff(.watchable(let target, let baseline), _, _) = session.run {
             let since = clock.now
             session.rivalWatch = Task {
                 await RivalWatch.observe(target, baseline: baseline, since: since, timeout: Self.rivalTimeout)
@@ -396,9 +409,15 @@ final class Coordinator {
     }
 
     private func partial(_ text: String, token: UUID) {
-        guard case .listening(let session) = phase, session.token == token else { return }
-        session.partial = text
-        overlay.render(.listening(partial: text))
+        switch phase {
+        case .listening(let session) where session.token == token:
+            session.partial = text
+            overlay.render(.listening(partial: text))
+        case .finishing(let session, _) where session.token == token:
+            session.partial = text   // salvage must see text finalized after release
+        default:
+            break
+        }
     }
 
     private func finish(_ session: LiveSession) async {
@@ -411,9 +430,12 @@ final class Coordinator {
         } catch {
             session.rivalWatch?.cancel()
             log.error("finish: transcription failed: \(String(describing: error))")
-            let salvaged = session.partial.isEmpty ? nil : session.partial
-            if let salvaged { Inserter.copyToClipboard(salvaged) }
-            settle(.failed(reason: "transcription failed", salvaged: salvaged))
+            var salvaged: String?
+            if case .dictate = session.run, !session.partial.isEmpty {
+                salvaged = session.partial
+                Inserter.copyToClipboard(session.partial)
+            }
+            settle(.failed(reason: "transcription failed", salvaged: salvaged, app: session.appName))
             return
         }
         timing.transcribe = clock.now - transcribeStart
@@ -438,7 +460,7 @@ final class Coordinator {
             } ?? PolishVerdict.keepRaw(.timeout)
             switch verdict {
             case .accept(let polished): delivered = .polished(polished, spoken: raw)
-            case .keepRaw(let rejection): log.notice("finish: kept raw (\(String(describing: rejection), privacy: .public))")
+            case .keepRaw(let rejection): log.notice("finish: kept raw (\(rejection.label, privacy: .public))")
             }
             timing.polish = clock.now - polishStart
         }
@@ -447,22 +469,21 @@ final class Coordinator {
         }
 
         switch session.run {
-        case .dictate(let target):
+        case .dictate(let destination):
             phase = .finishing(session, .inserting)
             overlay.render(.working(FinishingStep.inserting.label))
             let insertStart = clock.now
             let outcome: InsertionOutcome
-            switch target {
-            case .armed(let armed): outcome = await Inserter.insert(delivered.text, into: armed)
-            case .secureField: outcome = .blocked(.secureField)   // unreachable: blocked at press; kept total
-            case .noFrontmostApp: outcome = Inserter.copyToClipboard(delivered.text, because: .noFrontmostApp)
+            switch destination {
+            case .field(let target): outcome = await Inserter.insert(delivered.text, into: target)
+            case .clipboardOnly: outcome = Inserter.copyToClipboard(delivered.text, because: .noFrontmostApp)
             }
             timing.insert = clock.now - insertStart
             lastTiming = timing
             log.notice("session: transcribe \(timing.transcribe.milliseconds) ms · polish \(timing.polish.milliseconds) ms · insert \(timing.insert.milliseconds) ms · \(Self.summary(of: outcome), privacy: .public)")
             settle(.landed(outcome, delivered, timing, app: session.appName))
 
-        case .bakeoff(let bakeoffTarget, let expected):
+        case .bakeoff(let bakeoffTarget, let expected, let runID):
             phase = .finishing(session, .watchingRival)
             overlay.render(.working(FinishingStep.watchingRival.label))
             let ours = timing.transcribe + timing.polish
@@ -472,7 +493,11 @@ final class Coordinator {
             case .unobservable: rival = .unobservable
             }
             lastTiming = timing
-            bakeoff.append(BakeoffRecord(app: session.appName, engine: session.rules.engine.wireKey, expected: expected, spoken: delivered.spoken, ours: delivered.text, oursMs: ours.milliseconds, rival: rival))
+            if runID == bakeoff.runID {
+                bakeoff.append(BakeoffRecord(app: session.appName, engine: session.rules.engine.wireKey, expected: expected, spoken: delivered.spoken, ours: delivered.text, oursMs: ours.milliseconds, rival: rival))
+            } else {
+                log.notice("finish: bake-off run was reset during the take — record dropped")
+            }
             log.notice("bakeoff: ours \(ours.milliseconds) ms · rival \(Self.summary(of: rival), privacy: .public)")
             settle(.compared(delivered, ours: ours, rival: rival, app: session.appName))
         }
@@ -499,19 +524,17 @@ final class Coordinator {
         case .landed(.inserted(_, .verified), _, let timing, _): return .settled("inserted · \(timing.total.milliseconds) ms", .ok)
         case .landed(.inserted(_, .posted), _, let timing, _): return .settled("sent · \(timing.total.milliseconds) ms", .ok)
         case .landed(.copiedToClipboard(let block), _, _, _): return .settled(copiedMessage(block), .warn)
-        case .landed(.blocked, _, _, _): return .settled("blocked — secure field", .warn)
         case .compared(_, let ours, .landed(_, let latency), _): return .settled("ours \(ours.milliseconds) ms · rival \(latency.milliseconds) ms", .ok)
         case .compared(_, let ours, .unobservable, _): return .settled("ours \(ours.milliseconds) ms · rival unobservable — use TextEdit or Notes", .warn)
         case .compared(_, let ours, .timedOut, _): return .settled("ours \(ours.milliseconds) ms · rival: nothing landed", .warn)
         case .nothingHeard: return .settled("nothing heard", .warn)
         case .blockedSecure: return .settled("secure field — dictation blocked", .warn)
-        case .failed(let reason, let salvaged): return .settled(salvaged != nil ? "\(reason) — draft copied" : reason, .warn)
+        case .failed(let reason, let salvaged, _): return .settled(salvaged != nil ? "\(reason) — draft copied" : reason, .warn)
         }
     }
 
     private static func copiedMessage(_ block: InsertionBlock) -> String {
         switch block {
-        case .secureField: return "copied — secure field"
         case .accessibilityDenied: return "copied — grant Accessibility"
         case .allStrategiesFailed: return "copied — could not insert"
         case .noFrontmostApp: return "copied"
@@ -527,22 +550,13 @@ final class Coordinator {
             case .inserted: recorded = .inserted
             case .copiedToClipboard(.targetLost): recorded = .targetLost
             case .copiedToClipboard: recorded = .copiedToClipboard
-            case .blocked: return nil
             }
             return DictationRecord(spoken: text.spoken, delivered: text.text, appName: app, outcome: recorded)
-        case .failed(_, let salvaged):
+        case .failed(_, let salvaged, let app):
             guard let salvaged else { return nil }
-            return DictationRecord(spoken: salvaged, delivered: salvaged, appName: "—", outcome: .copiedToClipboard)
+            return DictationRecord(spoken: salvaged, delivered: salvaged, appName: app, outcome: .copiedToClipboard)
         case .compared, .nothingHeard, .blockedSecure:
             return nil
-        }
-    }
-
-    static func appName(of target: ArmResult) -> String {
-        switch target {
-        case .armed(let armed): return armed.app.name
-        case .secureField(let app): return app.name
-        case .noFrontmostApp: return "—"
         }
     }
 
@@ -551,7 +565,6 @@ final class Coordinator {
         case .inserted(let via, .verified): return "inserted(\(via.rawValue), verified)"
         case .inserted(let via, .posted): return "inserted(\(via.rawValue), posted)"
         case .copiedToClipboard(let block): return "copied(\(block))"
-        case .blocked(let block): return "blocked(\(block))"
         }
     }
 
@@ -563,10 +576,17 @@ final class Coordinator {
         }
     }
 
-    private static func placement(for mode: AppMode) -> OverlayPlacement {
-        switch mode {
+    private static func placement(for run: Run) -> OverlayPlacement {
+        switch run {
         case .dictate: return .bottom
         case .bakeoff: return .raised
+        }
+    }
+
+    private static func badge(for engine: Engine) -> String? {
+        switch engine.privacyClass {
+        case .onDevice: return nil
+        case .cloud: return "cloud"
         }
     }
 
@@ -638,18 +658,32 @@ final class Coordinator {
         }
     }
 
-    /// Runs non-throwing work against a deadline; nil on timeout.
+    /// Runs non-throwing work against a deadline; nil on timeout. Returns at the deadline even if the
+    /// loser ignores cancellation (the on-device model is only cooperatively cancellable).
     private static func race<T: Sendable>(timeout: Duration, _ work: @escaping @Sendable () async -> T) async -> T? {
-        await withTaskGroup(of: T?.self) { group in
-            group.addTask { await work() }
-            group.addTask {
+        let once = OnceResume<T?>()
+        return await withCheckedContinuation { continuation in
+            let worker = Task { let value = await work(); once.resume(continuation, with: value) }
+            Task {
                 try? await Task.sleep(for: timeout)
-                return nil
+                once.resume(continuation, with: nil)
+                worker.cancel()
             }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
         }
+    }
+}
+
+/// Resumes a continuation exactly once across racing tasks.
+final class OnceResume<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+
+    func resume(_ continuation: CheckedContinuation<T, Never>, with value: T) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !done else { return }
+        done = true
+        continuation.resume(returning: value)
     }
 }
 

@@ -80,6 +80,8 @@ public final class HoldGestureMonitor {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+            // Events were lost while disabled — resynchronize with the live modifier state.
+            transition(chordHeld: CGEventSource.flagsState(.combinedSessionState).contains(chord.flags))
         case .flagsChanged:
             let held = event.flags.contains(chord.flags)
             log.debug("flagsChanged: flags=0x\(String(event.flags.rawValue, radix: 16), privacy: .public) key=\(event.getIntegerValueField(.keyboardEventKeycode)) chordHeld=\(held)")

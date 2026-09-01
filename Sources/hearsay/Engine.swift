@@ -20,7 +20,7 @@ enum Engine: Equatable {
         [.appleLocal, .elevenLabsScribe] + openRouterModels.map { .openRouter(model: $0) }
     }
 
-    /// Wire key: persisted in Settings and exchanged with the arena page. `init(wireKey:)` is its exact inverse.
+    /// Wire key: persisted in Settings and stamped on BakeoffRecords. `init(wireKey:)` is its exact inverse.
     var wireKey: String {
         switch self {
         case .appleLocal: return "apple-local"
@@ -50,8 +50,12 @@ enum Engine: Equatable {
     }
 
     /// Only the Apple engine needs a locale; the cloud engines detect language themselves.
+    /// Exhaustive on purpose: a new engine must decide this explicitly.
     var needsLocale: Bool {
-        self == .appleLocal
+        switch self {
+        case .appleLocal: return true
+        case .openRouter, .elevenLabsScribe: return false
+        }
     }
 
     var requiredKey: String? {
@@ -87,8 +91,8 @@ enum Engine: Equatable {
     func makeTranscriber(locale: Locale) -> (any Transcriber)? {
         switch self {
         case .appleLocal: return SpeechAnalyzerTranscriber(locale: locale)
-        case .openRouter(let model): return OpenRouterTranscriber(model: model, locale: locale)
-        case .elevenLabsScribe: return ElevenLabsTranscriber(locale: locale)
+        case .openRouter(let model): return OpenRouterTranscriber(model: model)
+        case .elevenLabsScribe: return ElevenLabsTranscriber()
         }
     }
 }

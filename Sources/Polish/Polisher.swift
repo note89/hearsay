@@ -31,6 +31,17 @@ public enum PolishRejection: Equatable, Sendable {
     case meaningDrift
     case timeout
     case failed(String)
+
+    /// Case name only — safe for logs; `failed`'s payload may echo prompt content.
+    public var label: String {
+        switch self {
+        case .modelUnavailable: return "modelUnavailable"
+        case .empty: return "empty"
+        case .meaningDrift: return "meaningDrift"
+        case .timeout: return "timeout"
+        case .failed: return "failed"
+        }
+    }
 }
 
 public enum PolishVerdict: Sendable {

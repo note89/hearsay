@@ -50,9 +50,12 @@ enum Permissions {
 enum Relaunch {
     static func now() {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", "sleep 0.4; open -n \"\(Bundle.main.bundleURL.path)\""]
-        try? process.run()
-        NSApp.terminate(nil)
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-n", Bundle.main.bundleURL.path]
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(400))
+            try? process.run()
+            NSApp.terminate(nil)
+        }
     }
 }

@@ -68,8 +68,7 @@ public struct Lexicon: Equatable {
             }
         }
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        try? content.data(using: .utf8)?.write(to: url, options: .atomic)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        FileManager.default.createFile(atPath: url.path, contents: content.data(using: .utf8), attributes: [.posixPermissions: 0o600])
     }
 
     static let fileHeader = """

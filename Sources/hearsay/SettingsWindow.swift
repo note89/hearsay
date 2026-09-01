@@ -1,6 +1,7 @@
 import AppKit
 import History
 import Lexicon
+import Combine
 import SwiftUI
 import Transcription
 
@@ -76,6 +77,10 @@ private struct DictationPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             PaneHeaderShared(title: "Dictation", subtitle: "Hold fn+shift anywhere. Release, and the words land at your cursor.")
+            if coordinator.activeEngine != coordinator.settings.engine {
+                Label("\(coordinator.settings.engine.label) needs its API key — dictating with Apple on-device until it is added. Your choice is kept.", systemImage: "key")
+                    .font(.callout).foregroundStyle(.orange)
+            }
 
             Text("ENGINE").font(.caption.bold()).foregroundStyle(.secondary)
             ForEach(Engine.all, id: \.wireKey) { engineOption in
@@ -112,16 +117,6 @@ private struct DictationPane: View {
                 } else {
                     Text("automatic — \(coordinator.settings.engine.label) detects the language")
                         .foregroundStyle(.secondary)
-                }
-            }
-            Toggle(isOn: Binding(
-                get: { coordinator.settings.fieldContextEnabled },
-                set: { coordinator.set(fieldContextEnabled: $0) }
-            )) {
-                VStack(alignment: .leading) {
-                    Text("Field context")
-                    Text("Reads the text around your cursor as terminology reference. On-device only — never uploaded, never stored.")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
 
@@ -224,7 +219,7 @@ private struct DictionaryPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            PaneHeaderShared(title: "Dictionary", subtitle: "Names and jargon, spelled your way. Entries are only ever added by you.")
+            PaneHeaderShared(title: "Dictionary", subtitle: "Names and jargon, spelled your way. Entries are only ever added by you. Terms guide cleanup (Style Light or Full); rewrites always apply.")
 
             HStack(spacing: 8) {
                 TextField("word or phrase", text: $newFrom).textFieldStyle(.roundedBorder)
@@ -317,6 +312,16 @@ private struct StylePane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             PaneHeaderShared(title: "Style", subtitle: "How much cleanup every dictation gets. All of it runs on this Mac.")
+            Toggle(isOn: Binding(
+                get: { coordinator.settings.fieldContextEnabled },
+                set: { coordinator.set(fieldContextEnabled: $0) }
+            )) {
+                VStack(alignment: .leading) {
+                    Text("Field context")
+                    Text("Cleanup reads the text around your cursor as terminology reference. On-device only — never uploaded, never stored. No effect when Style is Off.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
 
             HStack(alignment: .top, spacing: 12) {
                 CleanupCard(

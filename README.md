@@ -74,7 +74,7 @@ menu bar → **Open hearsay…** window:
 | ElevenLabs Scribe | ElevenLabs cloud | ~$2.80 / 100k words | automatic |
 | Gemini 2.5 Flash‑Lite / Flash | Google via OpenRouter | ~$0.50 – $1.85 / 100k words | automatic |
 
-Cloud engines are optional comparison tools: menu → Engine → **API Keys…** opens
+Cloud engines are optional comparison tools: Open hearsay… → **Dictation** → **API Keys…** opens
 `~/Library/Application Support/hearsay/keys.env` (0600, template included). `OPENROUTER_API_KEY`
 unlocks both Geminis; `ELEVEN_LABS_API_KEY` unlocks Scribe. ElevenLabs is not reachable via
 OpenRouter — separate key.

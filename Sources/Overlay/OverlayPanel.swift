@@ -25,6 +25,8 @@ final class OverlayModel {
     static let barCount = 28
 
     var state: OverlayState = .hidden
+    /// Short tag shown beside the waveform (e.g. "cloud") so the session's privacy class is visible mid-dictation.
+    var badge: String?
     var levels: [Float] = Array(repeating: 0, count: OverlayModel.barCount)
 
     func push(level: Float) {
@@ -82,14 +84,17 @@ public final class OverlayPanel {
         model.push(level: level)
     }
 
+    public func setBadge(_ badge: String?) {
+        model.badge = badge
+    }
+
     public func place(_ placement: OverlayPlacement) {
         self.placement = placement
     }
 
     private func show() {
-        guard !panel.isVisible else { return }
         panel.setFrameOrigin(Self.origin(on: Self.screenUnderMouse(), placement: placement))
-        panel.orderFrontRegardless()
+        if !panel.isVisible { panel.orderFrontRegardless() }
     }
 
     private static func screenUnderMouse() -> NSScreen? {
