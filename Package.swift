@@ -12,7 +12,7 @@ let package = Package(
         .target(name: "Insertion"),
         .target(name: "History"),
         .target(name: "Overlay"),
-        .target(name: "Bakeoff", dependencies: ["Insertion"]),
+        .target(name: "Bakeoff"),
         .target(name: "Lexicon"),
         .executableTarget(name: "bakeoff-tests", dependencies: ["Bakeoff"]),
         .executableTarget(

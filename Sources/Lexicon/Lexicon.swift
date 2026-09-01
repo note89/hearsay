@@ -58,7 +58,8 @@ public struct Lexicon: Equatable {
         return entries
     }
 
-    /// Rewrites the file from the entry list (standard header; the file remains hand-editable).
+    /// Rewrites the file from the entry list under the standard header. Hand edits to entries are
+    /// read back; hand-written comments are not preserved (the header says so).
     public static func save(_ entries: [LexiconEntry], to url: URL) {
         var content = fileHeader
         for entry in entries {
@@ -78,6 +79,7 @@ public struct Lexicon: Equatable {
     #   mprox -> mprocs    a rewrite: the left side always becomes the right side
     #
     # Lines starting with # are ignored. The dictionary is read fresh at every dictation.
+    # Managed by the Dictionary pane: your own comments below this header are not kept.
 
     """
 

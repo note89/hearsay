@@ -14,11 +14,11 @@ import Utterance
 
 /// Text bound for the target, with its provenance. Only the Coordinator unwraps this into the
 /// bare String that the Insertion mechanism takes.
-enum InsertableText {
+indirect enum InsertableText {
     case polished(PolishedText, spoken: RawTranscript)
     case raw(RawTranscript)
-    /// Dictionary rewrites applied on top of one of the above.
-    case rewritten(text: String, spoken: String)
+    /// Dictionary rewrites applied over a polished or raw base — the base is kept, not flattened.
+    case rewritten(text: String, over: InsertableText)
 
     var text: String {
         switch self {
@@ -32,7 +32,7 @@ enum InsertableText {
         switch self {
         case .polished(_, let spoken): return spoken.text
         case .raw(let raw): return raw.text
-        case .rewritten(_, let spoken): return spoken
+        case .rewritten(_, let base): return base.spoken
         }
     }
 }
@@ -60,7 +60,8 @@ enum BakeoffTarget {
 }
 
 /// What a session does with its text: the single representation of "dictate vs bake-off".
-enum Run {
+/// ("Run" is reserved for the bake-off's multi-take run.)
+enum SessionPlan {
     case dictate(DictationDestination)
     case bakeoff(BakeoffTarget, expected: String?, runID: UUID)
 }
@@ -114,20 +115,20 @@ enum GestureStatus: Equatable {
 final class LiveSession {
     let token: UUID
     let rules: SessionRules
-    let run: Run
+    let plan: SessionPlan
     let transcription: Task<RawTranscript, Error>
     var partial = ""
     var rivalWatch: Task<RivalObservation, Never>?
 
-    init(token: UUID, rules: SessionRules, run: Run, transcription: Task<RawTranscript, Error>) {
+    init(token: UUID, rules: SessionRules, plan: SessionPlan, transcription: Task<RawTranscript, Error>) {
         self.token = token
         self.rules = rules
-        self.run = run
+        self.plan = plan
         self.transcription = transcription
     }
 
     var appName: String {
-        switch run {
+        switch plan {
         case .dictate(.field(let target)): return target.app.name
         case .dictate(.clipboardOnly): return "—"
         case .bakeoff(.watchable(let target, _), _, _): return target.app.name
@@ -204,6 +205,7 @@ final class Coordinator {
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("hearsay")
+        KeyStore.configure(directory: support)
         history = HistoryStore(directory: support)
         dictionaryURL = support.appendingPathComponent("dictionary.txt")
         bakeoff = BakeoffStore(directory: support)
@@ -218,12 +220,12 @@ final class Coordinator {
 
     func select(locale: Locale) {
         settings.locale = locale
-        rebuildTranscriber()
+        activateEngine()
     }
 
     func select(engine chosen: Engine) {
         settings.engine = chosen
-        rebuildTranscriber()
+        activateEngine()
     }
 
     func set(polish: PolishMode) {
@@ -264,11 +266,12 @@ final class Coordinator {
 
     // MARK: - Engine
 
-    private func rebuildTranscriber() {
+    /// Resolves the chosen engine to the one sessions run on (Apple when a key is missing) and (re)builds its transcriber.
+    private func activateEngine() {
         let chosen = settings.engine
         var resolved = chosen
         if !chosen.isAvailable {
-            log.notice("rebuildTranscriber: \(chosen.wireKey, privacy: .public) needs an API key — running on Apple until it is added")
+            log.notice("activateEngine: \(chosen.wireKey, privacy: .public) needs an API key — running on Apple until it is added")
             resolved = .appleLocal
         }
         if let built = resolved.makeTranscriber(locale: settings.locale) {
@@ -340,22 +343,22 @@ final class Coordinator {
         )
         // Bake-off iff the text would land in our own pane: same arm() snapshot the session uses,
         // so activation state and view lifecycle cannot disagree with it.
-        let run: Run
+        let plan: SessionPlan
         if let armed = armedTarget, armed.app.pid == ProcessInfo.processInfo.processIdentifier,
            case .textElement = armed.focused, bakeoffPaneVisible {
             let position = bakeoff.records.count
             let expected = position < BakeoffScript.sentences.count ? BakeoffScript.sentences[position].text : nil
             if let baseline = armed.currentText() {
-                run = .bakeoff(.watchable(armed, baseline: baseline), expected: expected, runID: bakeoff.runID)
+                plan = .bakeoff(.watchable(armed, baseline: baseline), expected: expected, runID: bakeoff.runID)
             } else {
-                run = .bakeoff(.unobservable(app: armed.app.name), expected: expected, runID: bakeoff.runID)
+                plan = .bakeoff(.unobservable(app: armed.app.name), expected: expected, runID: bakeoff.runID)
             }
         } else if let armed = armedTarget {
-            run = .dictate(.field(armed))
+            plan = .dictate(.field(armed))
         } else {
-            run = .dictate(.clipboardOnly)
+            plan = .dictate(.clipboardOnly)
         }
-        overlay.place(Self.placement(for: run))
+        overlay.place(Self.placement(for: plan))
         overlay.setBadge(Self.badge(for: rules.engine))
         let audio: AsyncStream<AVAudioPCMBuffer>
         do {
@@ -381,7 +384,7 @@ final class Coordinator {
             guard let final else { throw TranscriptionFailure.endedWithoutFinal }
             return final
         }
-        phase = .listening(LiveSession(token: token, rules: rules, run: run, transcription: transcription))
+        phase = .listening(LiveSession(token: token, rules: rules, plan: plan, transcription: transcription))
         overlay.render(.listening(partial: ""))
     }
 
@@ -391,10 +394,10 @@ final class Coordinator {
             return
         }
         capture.stop()
-        if case .bakeoff(.watchable(let target, let baseline), _, _) = session.run {
+        if case .bakeoff(.watchable(let target, let baseline), _, _) = session.plan {
             let since = clock.now
             session.rivalWatch = Task {
-                await RivalWatch.observe(target, baseline: baseline, since: since, timeout: Self.rivalTimeout)
+                await RivalWatch.observe(read: { target.currentText() }, baseline: baseline, since: since, timeout: Self.rivalTimeout)
             }
         }
         phase = .finishing(session, .transcribing)
@@ -431,7 +434,7 @@ final class Coordinator {
             session.rivalWatch?.cancel()
             log.error("finish: transcription failed: \(String(describing: error))")
             var salvaged: String?
-            if case .dictate = session.run, !session.partial.isEmpty {
+            if case .dictate = session.plan, !session.partial.isEmpty {
                 salvaged = session.partial
                 Inserter.copyToClipboard(session.partial)
             }
@@ -465,10 +468,10 @@ final class Coordinator {
             timing.polish = clock.now - polishStart
         }
         if let rewritten = session.rules.lexicon.rewriteResult(of: delivered.text) {
-            delivered = .rewritten(text: rewritten, spoken: delivered.spoken)
+            delivered = .rewritten(text: rewritten, over: delivered)
         }
 
-        switch session.run {
+        switch session.plan {
         case .dictate(let destination):
             phase = .finishing(session, .inserting)
             overlay.render(.working(FinishingStep.inserting.label))
@@ -506,7 +509,7 @@ final class Coordinator {
     private func settle(_ outcome: SessionOutcome) {
         phase = .settled(outcome)
         overlay.render(Self.overlayState(for: outcome))
-        if settings.historyEnabled, let record = Self.record(outcome) { history.record(record) }
+        if settings.historyEnabled, let entry = Self.historyEntry(for: outcome) { history.record(entry) }
         let display: Duration
         if case .compared = outcome { display = Self.bakeoffDisplay } else { display = Self.settleDisplay }
         settleTask = Task { [weak self] in
@@ -527,6 +530,7 @@ final class Coordinator {
         case .compared(_, let ours, .landed(_, let latency), _): return .settled("ours \(ours.milliseconds) ms · rival \(latency.milliseconds) ms", .ok)
         case .compared(_, let ours, .unobservable, _): return .settled("ours \(ours.milliseconds) ms · rival unobservable — use TextEdit or Notes", .warn)
         case .compared(_, let ours, .timedOut, _): return .settled("ours \(ours.milliseconds) ms · rival: nothing landed", .warn)
+        case .compared(_, let ours, .abandoned, _): return .settled("ours \(ours.milliseconds) ms · rival watch abandoned", .warn)
         case .nothingHeard: return .settled("nothing heard", .warn)
         case .blockedSecure: return .settled("secure field — dictation blocked", .warn)
         case .failed(let reason, let salvaged, _): return .settled(salvaged != nil ? "\(reason) — draft copied" : reason, .warn)
@@ -542,7 +546,7 @@ final class Coordinator {
         }
     }
 
-    private static func record(_ outcome: SessionOutcome) -> DictationRecord? {
+    private static func historyEntry(for outcome: SessionOutcome) -> DictationRecord? {
         switch outcome {
         case .landed(let insertion, let text, _, let app):
             let recorded: RecordedOutcome
@@ -573,11 +577,12 @@ final class Coordinator {
         case .landed(_, let latency): return "landed \(latency.milliseconds) ms"
         case .unobservable: return "unobservable"
         case .timedOut(let after): return "nothing after \(after.milliseconds) ms"
+        case .abandoned: return "abandoned"
         }
     }
 
-    private static func placement(for run: Run) -> OverlayPlacement {
-        switch run {
+    private static func placement(for plan: SessionPlan) -> OverlayPlacement {
+        switch plan {
         case .dictate: return .bottom
         case .bakeoff: return .raised
         }
@@ -595,7 +600,7 @@ final class Coordinator {
     private func bootstrap() async {
         polisher.prewarm()
         startGesture()
-        rebuildTranscriber()
+        activateEngine()
         Task {
             availableLocales = await SpeechAnalyzerTranscriber.supportedLocales()
                 .sorted { $0.displayName < $1.displayName }

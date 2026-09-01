@@ -2,6 +2,7 @@ import AppKit
 import History
 import Lexicon
 import Combine
+import Polish
 import SwiftUI
 import Transcription
 
@@ -56,7 +57,7 @@ struct SettingsWindowView: View {
     }
 }
 
-struct PaneHeaderShared: View {
+struct PaneHeader: View {
     let title: String
     let subtitle: String
 
@@ -76,7 +77,7 @@ private struct DictationPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            PaneHeaderShared(title: "Dictation", subtitle: "Hold fn+shift anywhere. Release, and the words land at your cursor.")
+            PaneHeader(title: "Dictation", subtitle: "Hold fn+shift anywhere. Release, and the words land at your cursor.")
             if coordinator.activeEngine != coordinator.settings.engine {
                 Label("\(coordinator.settings.engine.label) needs its API key — dictating with Apple on-device until it is added. Your choice is kept.", systemImage: "key")
                     .font(.callout).foregroundStyle(.orange)
@@ -219,7 +220,7 @@ private struct DictionaryPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            PaneHeaderShared(title: "Dictionary", subtitle: "Names and jargon, spelled your way. Entries are only ever added by you. Terms guide cleanup (Style Light or Full); rewrites always apply.")
+            PaneHeader(title: "Dictionary", subtitle: "Names and jargon, spelled your way. Entries are only ever added by you. Terms guide cleanup (Style Light or Full); rewrites always apply.")
 
             HStack(spacing: 8) {
                 TextField("word or phrase", text: $newFrom).textFieldStyle(.roundedBorder)
@@ -311,7 +312,7 @@ private struct StylePane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            PaneHeaderShared(title: "Style", subtitle: "How much cleanup every dictation gets. All of it runs on this Mac.")
+            PaneHeader(title: "Style", subtitle: "How much cleanup every dictation gets. All of it runs on this Mac.")
             Toggle(isOn: Binding(
                 get: { coordinator.settings.fieldContextEnabled },
                 set: { coordinator.set(fieldContextEnabled: $0) }
@@ -347,13 +348,11 @@ private struct StylePane: View {
             Divider().padding(.vertical, 4)
 
             Text("TONE FOLLOWS THE APP").font(.caption.bold()).foregroundStyle(.secondary)
-            // Display table for StyleInference — update both together.
             VStack(alignment: .leading, spacing: 6) {
-                styleRow("Chat", "Slack, Messages, WhatsApp, Discord, Telegram, Signal", "casual, no trailing period")
-                styleRow("Email", "Mail, Outlook, Spark, Superhuman", "complete sentences, paragraphs")
-                styleRow("Code", "Cursor, VS Code, Xcode, terminals, Zed, JetBrains", "identifiers verbatim, straight quotes")
-                styleRow("Markdown", "Obsidian, Notion, Bear, Craft", "- lists, # headings, `code`")
-                styleRow("Plain", "everything else", "neutral written prose")
+                ForEach([WritingStyle.chat, .email, .code, .markdown], id: \.rawValue) { style in
+                    styleRow(style.rawValue.capitalized, StyleInference.appNames(for: style).joined(separator: ", "), StyleInference.effect(of: style))
+                }
+                styleRow("Plain", "everything else", StyleInference.effect(of: .plain))
             }
         }
     }
@@ -411,7 +410,7 @@ private struct HistoryPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            PaneHeaderShared(title: "History", subtitle: "The trash of dictation — whatever didn't land is still here. Plain file, local, yours.")
+            PaneHeader(title: "History", subtitle: "The trash of dictation — whatever didn't land is still here. Plain file, local, yours.")
 
             HStack {
                 Toggle("Keep history", isOn: Binding(
@@ -432,6 +431,10 @@ private struct HistoryPane: View {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(record.delivered).lineLimit(3)
+                            if record.spoken != record.delivered {
+                                Text("heard: \(record.spoken)").lineLimit(2)
+                                    .font(.caption).foregroundStyle(.tertiary)
+                            }
                             Text("\(Self.timestamp.string(from: record.at)) · \(record.appName)")
                                 .font(.caption).foregroundStyle(.secondary)
                         }

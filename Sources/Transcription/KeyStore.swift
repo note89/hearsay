@@ -3,14 +3,44 @@ import Foundation
 /// API keys for the optional cloud engines. Resolution order:
 /// process environment → the app's own keys file → an export line in ~/.zshrc (developer convenience).
 public enum KeyStore {
-    public static let fileURL = FileManager.default
+    private static var directory = FileManager.default
         .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("hearsay/keys.env")
+        .appendingPathComponent("hearsay")
+    private static var fileURL: URL { directory.appendingPathComponent("keys.env") }
 
+    /// The app owns the support directory; it tells KeyStore where that is once at launch.
+    public static func configure(directory: URL) {
+        Self.directory = directory
+        cache = nil
+    }
+
+    private static var cache: (mtime: Date?, values: [String: String])?
+
+    /// Cheap after the first call: file contents are cached until keys.env changes.
     public static func value(_ name: String) -> String? {
         if let env = ProcessInfo.processInfo.environment[name], !env.isEmpty { return env }
-        if let fromFile = parse(file: fileURL.path, name: name) { return fromFile }
+        let mtime = (try? FileManager.default.attributesOfItem(atPath: fileURL.path))?[.modificationDate] as? Date
+        if cache == nil || cache?.mtime != mtime {
+            cache = (mtime, parseAll(file: fileURL.path))
+        }
+        if let fromFile = cache?.values[name] { return fromFile }
         return parse(file: NSHomeDirectory() + "/.zshrc", name: name)
+    }
+
+    private static func parseAll(file: String) -> [String: String] {
+        guard let content = try? String(contentsOfFile: file, encoding: .utf8) else { return [:] }
+        var values: [String: String] = [:]
+        for line in content.split(separator: "\n") {
+            var trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("#") { continue }
+            if trimmed.hasPrefix("export ") { trimmed = String(trimmed.dropFirst("export ".count)) }
+            guard let equals = trimmed.firstIndex(of: "=") else { continue }
+            var value = String(trimmed[trimmed.index(after: equals)...])
+            if let comment = value.firstIndex(of: "#") { value = String(value[..<comment]) }
+            value = value.trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+            if !value.isEmpty { values[String(trimmed[..<equals])] = value }
+        }
+        return values
     }
 
     /// Creates the keys file with a commented template when missing, so "API Keys…" always opens something editable.

@@ -1,14 +1,16 @@
 import Foundation
-import Insertion
 
 public enum RivalObservation: Sendable {
     case landed(text: String, latency: Duration)
-    /// The field is not readable through accessibility (web view, unknown element).
+    /// The field is not readable (web view, unknown element).
     case unobservable
     case timedOut(after: Duration)
+    /// The watch was cancelled before it could conclude — not a measurement.
+    case abandoned
 }
 
-/// Watches the target field for text another app inserts, timed from the same key-up we reacted to.
+/// Watches a field for text another app inserts, timed from the same key-up we reacted to.
+/// Reads the field through a closure so this module knows nothing about how fields are addressed.
 public enum RivalWatch {
     static let pollInterval: Duration = .milliseconds(15)
     /// After the first change, wait this long and re-read so a rival that inserts in pieces is captured whole.
@@ -16,7 +18,7 @@ public enum RivalWatch {
 
     @MainActor
     public static func observe(
-        _ target: InsertionTarget,
+        read: @escaping @MainActor () -> String?,
         baseline: String,
         since: ContinuousClock.Instant,
         timeout: Duration
@@ -24,14 +26,14 @@ public enum RivalWatch {
         let clock = ContinuousClock()
         let deadline = clock.now + timeout
         while clock.now < deadline {
-            guard let now = target.currentText() else { return .unobservable }
+            guard let now = read() else { return .unobservable }
             if now != baseline {
                 let latency = clock.now - since
-                do { try await Task.sleep(for: completionGrace) } catch { return .landed(text: inserted(from: baseline, to: now), latency: latency) }
-                let settled = target.currentText() ?? now
+                do { try await Task.sleep(for: completionGrace) } catch { return .abandoned }
+                let settled = read() ?? now
                 return .landed(text: inserted(from: baseline, to: settled), latency: latency)
             }
-            do { try await Task.sleep(for: pollInterval) } catch { return .timedOut(after: clock.now - since) }
+            do { try await Task.sleep(for: pollInterval) } catch { return .abandoned }
         }
         return .timedOut(after: timeout)
     }

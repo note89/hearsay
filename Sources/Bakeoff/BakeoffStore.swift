@@ -1,10 +1,22 @@
 import Foundation
 import Observation
 
-public enum RivalStatus: String, Codable, Sendable {
-    case landed
+/// What the rival did for one take. Decoding parses the flat on-disk fields into this union;
+/// a line that does not form a legal state is dropped rather than admitted.
+public enum RivalOutcome: Equatable, Sendable {
+    case landed(text: String, ms: Int)
     case unobservable
     case timedOut
+    case abandoned
+
+    public var status: String {
+        switch self {
+        case .landed: return "landed"
+        case .unobservable: return "unobservable"
+        case .timedOut: return "timedOut"
+        case .abandoned: return "abandoned"
+        }
+    }
 }
 
 /// One utterance, both contenders, one clock. Appended as JSON lines; scored live by the Bake-off pane.
@@ -19,9 +31,7 @@ public struct BakeoffRecord: Codable, Sendable, Identifiable {
     public let spoken: String
     public let ours: String
     public let oursMs: Int
-    public let rivalStatus: RivalStatus
-    public let rival: String?
-    public let rivalMs: Int?
+    public let rival: RivalOutcome
 
     public init(app: String, engine: String, expected: String?, spoken: String, ours: String, oursMs: Int, rival observation: RivalObservation) {
         at = Date()
@@ -32,18 +42,53 @@ public struct BakeoffRecord: Codable, Sendable, Identifiable {
         self.ours = ours
         self.oursMs = oursMs
         switch observation {
-        case .landed(let text, let latency):
-            rivalStatus = .landed
-            rival = text
-            rivalMs = Int(latency / .milliseconds(1))
-        case .unobservable:
-            rivalStatus = .unobservable
-            rival = nil
-            rivalMs = nil
-        case .timedOut:
-            rivalStatus = .timedOut
-            rival = nil
-            rivalMs = nil
+        case .landed(let text, let latency): rival = .landed(text: text, ms: Int(latency / .milliseconds(1)))
+        case .unobservable: rival = .unobservable
+        case .timedOut: rival = .timedOut
+        case .abandoned: rival = .abandoned
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case at, app, engine, expected, spoken, ours, oursMs, rivalStatus, rival, rivalMs
+    }
+
+    struct IllegalRivalState: Error {}
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        at = try c.decode(Date.self, forKey: .at)
+        app = try c.decode(String.self, forKey: .app)
+        engine = try c.decode(String.self, forKey: .engine)
+        expected = try c.decodeIfPresent(String.self, forKey: .expected)
+        spoken = try c.decode(String.self, forKey: .spoken)
+        ours = try c.decode(String.self, forKey: .ours)
+        oursMs = try c.decode(Int.self, forKey: .oursMs)
+        let status = try c.decode(String.self, forKey: .rivalStatus)
+        let text = try c.decodeIfPresent(String.self, forKey: .rival)
+        let ms = try c.decodeIfPresent(Int.self, forKey: .rivalMs)
+        switch (status, text, ms) {
+        case ("landed", let text?, let ms?): rival = .landed(text: text, ms: ms)
+        case ("unobservable", nil, nil): rival = .unobservable
+        case ("timedOut", nil, nil): rival = .timedOut
+        case ("abandoned", nil, nil): rival = .abandoned
+        default: throw IllegalRivalState()
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(at, forKey: .at)
+        try c.encode(app, forKey: .app)
+        try c.encode(engine, forKey: .engine)
+        try c.encodeIfPresent(expected, forKey: .expected)
+        try c.encode(spoken, forKey: .spoken)
+        try c.encode(ours, forKey: .ours)
+        try c.encode(oursMs, forKey: .oursMs)
+        try c.encode(rival.status, forKey: .rivalStatus)
+        if case .landed(let text, let ms) = rival {
+            try c.encode(text, forKey: .rival)
+            try c.encode(ms, forKey: .rivalMs)
         }
     }
 }

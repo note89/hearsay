@@ -74,6 +74,8 @@ public enum PolishGuard {
     static let maxInventedShare = 0.6
     static let minKeptShare = 0.25
     static let maxLengthRatio = 1.5
+    /// A two-word utterance may legitimately double when punctuated or expanded; the ratio alone is too strict for it.
+    static let lengthSlackWords = 3
 
     public static func verdict(spoken: String, candidate: String) -> PolishVerdict {
         let cleaned = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -87,7 +89,7 @@ public enum PolishGuard {
         let candidateSet = Set(candidateWords)
         let inventedShare = Double(candidateWords.filter { !spokenSet.contains($0) }.count) / Double(candidateWords.count)
         let keptShare = Double(spokenWords.filter { candidateSet.contains($0) }.count) / Double(spokenWords.count)
-        let grewPastSpoken = Double(candidateWords.count) > maxLengthRatio * Double(spokenWords.count) + 3
+        let grewPastSpoken = Double(candidateWords.count) > maxLengthRatio * Double(spokenWords.count) + Double(lengthSlackWords)
         if inventedShare > maxInventedShare || keptShare < minKeptShare || grewPastSpoken { return .keepRaw(.meaningDrift) }
         return .accept(PolishedText(text: cleaned))
     }

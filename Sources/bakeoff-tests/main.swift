@@ -44,6 +44,24 @@ for (r, h) in [("wait 5ms for HTTP/2", "wait five milliseconds for HTTP2"), ("pl
 }
 expect(Scorer.wer(reference: "the cache is stale", hypothesis: "the cache stale") > 0, "deletion still scores")
 
+// RunSummary: aggregation and verdict over records
+let winTake = BakeoffRecord(app: "T", engine: "apple-local", expected: "the cache is stale", spoken: "the cache is stale", ours: "the cache is stale", oursMs: 300, rival: .landed(text: "the cash is stale", latency: .milliseconds(900)))
+let lossTake = BakeoffRecord(app: "T", engine: "apple-local", expected: "send the invoice", spoken: "send the invoice", ours: "send the voice", oursMs: 200, rival: .landed(text: "send the invoice", latency: .milliseconds(700)))
+let unscoredTake = BakeoffRecord(app: "T", engine: "apple-local", expected: "hello there", spoken: "hello there", ours: "hello there", oursMs: 100, rival: .timedOut(after: .seconds(8)))
+let legacyTake = BakeoffRecord(app: "T", engine: "apple-local", expected: nil, spoken: "x", ours: "x", oursMs: 1, rival: .unobservable)
+let summary = RunSummary(records: [winTake, lossTake, unscoredTake, legacyTake])
+expect(summary.takes.count == 3, "summary: takes without expected are skipped")
+expect(summary.wins == 1 && summary.losses == 1 && summary.ties == 0, "summary: verdict counts")
+expect(summary.engines.count == 1 && summary.engines[0].takes == 2, "summary: engine group over landed takes only")
+expect(summary.engines[0].meanOursMs == 250 && summary.engines[0].meanRivalMs == 800, "summary: latency means")
+expect(summary.takes[2].rivalWer == nil, "summary: timed-out rival is unscored")
+
+// BakeoffRecord: illegal on-disk states are dropped at decode
+let illegal = Data(#"{"at":0,"app":"T","engine":"apple-local","spoken":"x","ours":"x","oursMs":1,"rivalStatus":"landed"}"#.utf8)
+expect((try? JSONDecoder().decode(BakeoffRecord.self, from: illegal)) == nil, "record: landed without text is illegal")
+let roundTrip = try! JSONDecoder().decode(BakeoffRecord.self, from: try! JSONEncoder().encode(winTake))
+expect(roundTrip.rival == .landed(text: "the cash is stale", ms: 900), "record: encode/decode round-trips the union")
+
 if failures > 0 {
     print("\(failures) failing")
     exit(1)

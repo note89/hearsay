@@ -7,8 +7,9 @@ struct BakeoffPane: View {
     @State private var fieldText = ""
 
     var body: some View {
+        let summary = RunSummary(records: coordinator.bakeoff.records)
         VStack(alignment: .leading, spacing: 16) {
-            PaneHeaderShared(
+            PaneHeader(
                 title: "Bake-off",
                 subtitle: "Same audio, same key-up, one clock. Run Wispr Flow alongside. While this pane is front, dictations score instead of inserting — leave the pane and hearsay dictates normally."
             )
@@ -47,9 +48,9 @@ struct BakeoffPane: View {
                     }
                 }
 
-            summary
-            verdictLine
-            resultRows
+            engineCards(summary)
+            verdict(summary)
+            rows(summary)
         }
         .onAppear { coordinator.bakeoffPaneVisible = true }
         .onDisappear { coordinator.bakeoffPaneVisible = false }
@@ -74,7 +75,7 @@ struct BakeoffPane: View {
                 let sentence = BakeoffScript.sentences[position]
                 Text("sentence \(position + 1) of \(BakeoffScript.sentences.count) · \(sentence.language)")
                     .font(.caption).foregroundStyle(.secondary)
-                if position > 0, BakeoffScript.sentences[position - 1].language != sentence.language, coordinator.settings.engine.needsLocale {
+                if position > 0, BakeoffScript.sentences[position - 1].language != sentence.language, coordinator.activeEngine.needsLocale {
                     Label("switch hearsay language to \(Locale(identifier: sentence.language).languageDisplayName)", systemImage: "globe")
                         .font(.caption).foregroundStyle(.orange)
                 }
@@ -91,48 +92,16 @@ struct BakeoffPane: View {
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .quaternarySystemFill)))
     }
 
-    private struct EngineGroup {
-        var count = 0
-        var oursWer = 0.0
-        var oursMs = 0
-        var rivalWer = 0.0
-        var rivalMs = 0
-    }
-
-    private var scored: [(record: BakeoffRecord, expected: String, oursWer: Double, rivalWer: Double?)] {
-        coordinator.bakeoff.records.compactMap { record in
-            guard let expected = record.expected else { return nil }
-            let ours = Scorer.wer(reference: expected, hypothesis: record.ours)
-            let rival: Double?
-            if record.rivalStatus == .landed, let rivalText = record.rival {
-                rival = Scorer.wer(reference: expected, hypothesis: rivalText)
-            } else {
-                rival = nil
-            }
-            return (record, expected, ours, rival)
-        }
-    }
-
-    private var summary: some View {
-        var groups: [String: EngineGroup] = [:]
-        for row in scored where row.rivalWer != nil {
-            var group = groups[row.record.engine, default: EngineGroup()]
-            group.count += 1
-            group.oursWer += row.oursWer
-            group.oursMs += row.record.oursMs
-            group.rivalWer += row.rivalWer ?? 0
-            group.rivalMs += row.record.rivalMs ?? 0
-            groups[row.record.engine] = group
-        }
-        return HStack(spacing: 12) {
-            ForEach(groups.sorted(by: { $0.key < $1.key }), id: \.key) { key, group in
+    private func engineCards(_ summary: RunSummary) -> some View {
+        HStack(spacing: 12) {
+            ForEach(summary.engines, id: \.engineKey) { engine in
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("\((Engine(wireKey: key)?.label ?? key).uppercased()) — \(group.count) scored")
+                    Text("\((Engine(wireKey: engine.engineKey)?.label ?? engine.engineKey).uppercased()) — \(engine.takes) scored")
                         .font(.caption2.bold()).foregroundStyle(.secondary)
-                    Text("\(Self.percent(group.oursWer / Double(group.count))) · \(group.oursMs / group.count) ms")
+                    Text("\(Self.percent(engine.meanOursWer)) · \(engine.meanOursMs) ms")
                         .font(.title3.bold()).foregroundStyle(.green)
                         + Text("  to text ready").font(.caption2).foregroundStyle(.secondary)
-                    Text("wispr, same rows: \(Self.percent(group.rivalWer / Double(group.count))) · \(group.rivalMs / group.count) ms")
+                    Text("wispr, same takes: \(Self.percent(engine.meanRivalWer)) · \(engine.meanRivalMs) ms")
                         .font(.caption).foregroundStyle(.orange)
                         + Text("  to text visible").font(.caption2).foregroundStyle(.secondary)
                 }
@@ -143,15 +112,11 @@ struct BakeoffPane: View {
     }
 
     @ViewBuilder
-    private var verdictLine: some View {
-        let decided = scored.filter { $0.rivalWer != nil }
-        let wins = decided.filter { $0.oursWer < ($0.rivalWer ?? 1) }.count
-        let losses = decided.filter { ($0.rivalWer ?? 1) < $0.oursWer }.count
-        let ties = decided.count - wins - losses
-        if decided.count >= 3 {
-            Text(wins >= losses
-                 ? "🏆 hearsay wins \(wins) · wispr \(losses)\(ties > 0 ? " · ties \(ties)" : "") — by WER only"
-                 : "wispr leads \(losses) · hearsay \(wins)\(ties > 0 ? " · ties \(ties)" : "") — by WER only")
+    private func verdict(_ summary: RunSummary) -> some View {
+        if summary.decided >= 3 {
+            Text(summary.wins >= summary.losses
+                 ? "🏆 hearsay wins \(summary.wins) · wispr \(summary.losses)\(summary.ties > 0 ? " · ties \(summary.ties)" : "") — by WER only"
+                 : "wispr leads \(summary.losses) · hearsay \(summary.wins)\(summary.ties > 0 ? " · ties \(summary.ties)" : "") — by WER only")
                 .font(.headline)
                 .frame(maxWidth: .infinity)
                 .padding(10)
@@ -159,29 +124,29 @@ struct BakeoffPane: View {
         }
     }
 
-    private var resultRows: some View {
+    private func rows(_ summary: RunSummary) -> some View {
         VStack(spacing: 0) {
-            ForEach(Array(scored.enumerated().reversed()), id: \.element.record.id) { index, row in
+            ForEach(Array(summary.takes.enumerated().reversed()), id: \.element.id) { index, take in
                 HStack(alignment: .top, spacing: 14) {
                     Text("\(index + 1)").foregroundStyle(.secondary).frame(width: 22, alignment: .trailing)
-                    Text(row.expected).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(take.expected).frame(maxWidth: .infinity, alignment: .leading)
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
-                            Text("\(Self.percent(row.oursWer)) · \(row.record.oursMs) ms").bold().foregroundStyle(.green)
-                            if row.record.engine != "apple-local" {
-                                Text("⚡\(row.record.engine.split(separator: "/").last.map(String.init) ?? row.record.engine)")
+                            Text("\(Self.percent(take.oursWer)) · \(take.record.oursMs) ms").bold().foregroundStyle(.green)
+                            if Engine(wireKey: take.record.engine) != .appleLocal {
+                                Text("⚡\(take.record.engine.split(separator: "/").last.map(String.init) ?? take.record.engine)")
                                     .font(.caption2).foregroundStyle(.secondary)
                             }
                         }
-                        diffText(reference: row.expected, hypothesis: row.record.ours)
+                        diffText(reference: take.expected, hypothesis: take.record.ours)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     VStack(alignment: .leading, spacing: 3) {
-                        if let rivalWer = row.rivalWer, let rivalText = row.record.rival {
-                            Text("\(Self.percent(rivalWer)) · \(row.record.rivalMs ?? 0) ms").bold().foregroundStyle(.orange)
-                            diffText(reference: row.expected, hypothesis: rivalText)
+                        if case .landed(let text, let ms) = take.record.rival, let rivalWer = take.rivalWer {
+                            Text("\(Self.percent(rivalWer)) · \(ms) ms").bold().foregroundStyle(.orange)
+                            diffText(reference: take.expected, hypothesis: text)
                         } else {
-                            Text(row.record.rivalStatus.rawValue).italic().foregroundStyle(.secondary)
+                            Text(take.record.rival.status).italic().foregroundStyle(.secondary)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

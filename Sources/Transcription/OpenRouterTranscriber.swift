@@ -24,20 +24,7 @@ public final class OpenRouterTranscriber: Transcriber {
 
     public func transcribe(_ audio: AsyncStream<AVAudioPCMBuffer>) -> AsyncThrowingStream<TranscriptionEvent, Error> {
         let (model, key) = (model, key)
-        return AsyncThrowingStream { continuation in
-            let task = Task.detached {
-                do {
-                    var accumulator = WavAccumulator()
-                    for await buffer in audio { try accumulator.append(buffer) }
-                    let text = try await Self.request(wav: accumulator.wavData(), model: model, key: key)
-                    continuation.yield(.final(RawTranscript(text: text.trimmingCharacters(in: .whitespacesAndNewlines))))
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+        return oneShotWavTranscription(audio) { wav in try await Self.request(wav: wav, model: model, key: key) }
     }
 
     private static func request(wav: Data, model: String, key: String) async throws -> String {

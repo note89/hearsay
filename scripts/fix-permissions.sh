@@ -10,7 +10,8 @@ sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains
 
 echo "2/4 re-sign build/hearsay.app with hearsay-dev…"
 echo "    (if a dialog says codesign wants to use key hearsay-dev → Always Allow)"
-codesign --force --sign hearsay-dev --identifier computer.borrowed.hearsay build/hearsay.app
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' Resources/Info.plist)"
+codesign --force --sign hearsay-dev --identifier "$BUNDLE_ID" build/hearsay.app
 codesign -dv build/hearsay.app 2>&1 | grep -E "Authority|Signature" || true
 
 echo "3/4 relaunch…"

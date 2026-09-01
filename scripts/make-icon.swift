@@ -1,4 +1,4 @@
-// Renders AppIcon.icns: dark rounded square, white waveform — same look as the overlay pill.
+// Renders Resources/AppIcon.icns: dark rounded square, white waveform — same look as the overlay pill.
 // Usage: swift scripts/make-icon.swift
 import AppKit
 
@@ -39,4 +39,9 @@ for (name, px) in [("icon_16x16", 16), ("icon_16x16@2x", 32), ("icon_32x32", 32)
     let png = draw(pixels: px).representation(using: .png, properties: [:])!
     try! png.write(to: URL(fileURLWithPath: "\(iconset)/\(name).png"))
 }
-print("iconset written")
+let iconutil = Process()
+iconutil.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
+iconutil.arguments = ["-c", "icns", iconset, "-o", "Resources/AppIcon.icns"]
+try! iconutil.run()
+iconutil.waitUntilExit()
+print(iconutil.terminationStatus == 0 ? "Resources/AppIcon.icns written" : "iconutil failed")
