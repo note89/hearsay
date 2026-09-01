@@ -1,17 +1,14 @@
 import AppKit
 import History
 import SwiftUI
-import Transcription
 
+/// The quick menu: mid-flow actions only. Configuration lives in the settings window.
 struct MenuView: View {
     let coordinator: Coordinator
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Button("Open hearsay…") {
-            openWindow(id: "settings")
-            NSApp.activate(ignoringOtherApps: true)
-        }
+        Button("Open hearsay…") { openSettingsWindow() }
         Divider()
         Text(statusLine)
         if let timing = coordinator.lastTiming {
@@ -27,46 +24,27 @@ struct MenuView: View {
                 }
             }
         }
-        Menu("Engine: \(coordinator.settings.engine.label)") {
-            ForEach(Engine.all, id: \.wireKey) { engineOption in
-                Button {
-                    coordinator.select(engine: engineOption)
-                } label: {
-                    Text((coordinator.settings.engine == engineOption ? "✓ " : "    ") + engineOption.label + (engineOption.isAvailable ? "" : " — needs key"))
-                }
-                .disabled(!engineOption.isAvailable)
-            }
-            Divider()
-            Button("API Keys…") { NSWorkspace.shared.open(KeyStore.ensureFile()) }
-        }
-        Menu("Cleanup: \(coordinator.settings.polish.rawValue)") {
-            ForEach([PolishMode.off, .light, .full], id: \.rawValue) { mode in
-                Button {
-                    coordinator.set(polish: mode)
-                } label: {
-                    Text((coordinator.settings.polish == mode ? "✓ " : "    ") + mode.rawValue)
-                }
-            }
-        }
-        Toggle("Field context — read around the cursor (on-device)", isOn: Binding(
-            get: { coordinator.settings.fieldContextEnabled },
-            set: { coordinator.set(fieldContextEnabled: $0) }
-        ))
-        Button("Dictionary…") { coordinator.openDictionary() }
-        Toggle("Bake-off mode — watch Wispr, never insert", isOn: Binding(
-            get: { coordinator.settings.mode == .bakeoff },
-            set: { coordinator.set(mode: $0 ? .bakeoff : .dictate) }
-        ))
-        Divider()
-        permissionsMenu
-        historyMenu
         if let last = coordinator.history.records.first {
             Button("Copy last dictation") { coordinator.copy(record: last) }
+        }
+        if !allPermissionsGranted {
+            Divider()
+            Button("⚠ Fix permissions…") { openSettingsWindow() }
         }
         Divider()
         Button("Relaunch") { Relaunch.now() }
         Button("Quit hearsay") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
+    }
+
+    private var allPermissionsGranted: Bool {
+        let report = Permissions.check()
+        return report.microphone && report.accessibility && report.inputMonitoring
+    }
+
+    private func openSettingsWindow() {
+        openWindow(id: "settings")
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private var statusLine: String {
@@ -85,51 +63,10 @@ struct MenuView: View {
         case .idle, .settled:
             switch coordinator.settings.mode {
             case .dictate: return "hold fn+shift to dictate"
-            case .bakeoff: return "bake-off: hold fn+shift, both apps listen"
+            case .bakeoff: return "bake-off mode — hold fn+shift, both apps listen"
             }
         case .listening: return "listening…"
         case .finishing(_, let step): return "\(step.label)…"
         }
-    }
-
-    private var permissionsMenu: some View {
-        let report = Permissions.check()
-        return Menu("Permissions") {
-            permissionRow("Microphone", granted: report.microphone, pane: .microphone)
-            permissionRow("Accessibility", granted: report.accessibility, pane: .accessibility)
-            permissionRow("Input Monitoring", granted: report.inputMonitoring, pane: .inputMonitoring)
-        }
-    }
-
-    private func permissionRow(_ name: String, granted: Bool, pane: PermissionPane) -> some View {
-        Button("\(granted ? "✓" : "✗") \(name)") { Permissions.openSettings(pane) }
-    }
-
-    private var historyMenu: some View {
-        Menu("History") {
-            Toggle("Keep history", isOn: Binding(
-                get: { coordinator.settings.historyEnabled },
-                set: { coordinator.set(historyEnabled: $0) }
-            ))
-            Button("Clear history") { coordinator.clearHistory() }
-            Divider()
-            if coordinator.history.records.isEmpty {
-                Text("nothing yet")
-            }
-            ForEach(coordinator.history.records.prefix(12)) { record in
-                Button(Self.title(for: record)) { coordinator.copy(record: record) }
-            }
-        }
-    }
-
-    private static func title(for record: DictationRecord) -> String {
-        let preview = record.delivered.count > 60 ? String(record.delivered.prefix(60)) + "…" : record.delivered
-        let marker: String
-        switch record.outcome {
-        case .inserted: marker = ""
-        case .copiedToClipboard: marker = " (copied)"
-        case .targetLost: marker = " (focus moved)"
-        }
-        return "\(preview)\(marker) — \(record.appName)"
     }
 }
