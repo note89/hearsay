@@ -56,7 +56,7 @@ enum BakeoffTarget {
 
 enum Run {
     case dictate(ArmResult)
-    case bakeoff(BakeoffTarget)
+    case bakeoff(BakeoffTarget, expected: String?)
 }
 
 enum FinishingStep {
@@ -123,8 +123,8 @@ final class LiveSession {
     var appName: String {
         switch run {
         case .dictate(let arm): return Coordinator.appName(of: arm)
-        case .bakeoff(.watchable(let target, _)): return target.app.name
-        case .bakeoff(.unobservable(let app)): return app
+        case .bakeoff(.watchable(let target, _), _): return target.app.name
+        case .bakeoff(.unobservable(let app), _): return app
         }
     }
 }
@@ -150,7 +150,7 @@ final class Coordinator {
     private(set) var availableLocales: [Locale] = []
     let settings = Settings()
     let history: HistoryStore
-    let bakeoffLog: BakeoffLog
+    let bakeoff: BakeoffStore
     @ObservationIgnored private var dictionaryURL: URL!
 
     private static let settleDisplay: Duration = .milliseconds(1400)
@@ -159,8 +159,6 @@ final class Coordinator {
     private static let polishTimeout: Duration = .seconds(8)
     private static let rivalTimeout: Duration = .seconds(8)
     private static let gestureRetry: Duration = .seconds(3)
-    /// Below the arena page's 800 ms poll so a control request is picked up within one page tick.
-    private static let controlPollInterval: TimeInterval = 0.7
 
     @ObservationIgnored private lazy var overlay = OverlayPanel()
     @ObservationIgnored private let capture = MicrophoneCapture()
@@ -169,8 +167,6 @@ final class Coordinator {
     @ObservationIgnored private var gestureMonitor: HoldGestureMonitor?
     @ObservationIgnored private var settleTask: Task<Void, Never>?
     @ObservationIgnored private var loadModelTask: Task<Void, Never>?
-    @ObservationIgnored private var bridge: ArenaBridge!
-    @ObservationIgnored private var controlTimer: Timer?
     @ObservationIgnored private let clock = ContinuousClock()
     @ObservationIgnored private let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "hearsay", category: "session")
 
@@ -179,8 +175,7 @@ final class Coordinator {
             .appendingPathComponent("hearsay")
         history = HistoryStore(directory: support)
         dictionaryURL = support.appendingPathComponent("dictionary.txt")
-        bakeoffLog = BakeoffLog(directory: support)
-        bridge = ArenaBridge(directory: support)
+        bakeoff = BakeoffStore(directory: support)
         transcriber = SpeechAnalyzerTranscriber(locale: settings.locale)   // placeholder; bootstrap rebuilds from the persisted engine
     }
 
@@ -203,12 +198,10 @@ final class Coordinator {
     func set(mode: AppMode) {
         settings.mode = mode
         overlay.place(Self.placement(for: mode))
-        publishStatus()
     }
 
     func set(polish: PolishMode) {
         settings.polish = polish
-        publishStatus()
     }
 
     func set(historyEnabled: Bool) {
@@ -263,7 +256,6 @@ final class Coordinator {
         case .appleLocal: reloadAppleModel()
         case .openRouter, .elevenLabsScribe: engine = .ready(settings.locale)
         }
-        publishStatus()
     }
 
     private func reloadAppleModel() {
@@ -319,10 +311,12 @@ final class Coordinator {
         )
         let run: Run
         if rules.mode == .bakeoff {
+            let position = bakeoff.records.count
+            let expected = position < BakeoffScript.sentences.count ? BakeoffScript.sentences[position].text : nil
             if case .armed(let armed) = target, let baseline = armed.currentText() {
-                run = .bakeoff(.watchable(armed, baseline: baseline))
+                run = .bakeoff(.watchable(armed, baseline: baseline), expected: expected)
             } else {
-                run = .bakeoff(.unobservable(app: Self.appName(of: target)))
+                run = .bakeoff(.unobservable(app: Self.appName(of: target)), expected: expected)
             }
         } else {
             run = .dictate(target)
@@ -362,7 +356,7 @@ final class Coordinator {
             return
         }
         capture.stop()
-        if case .bakeoff(.watchable(let target, let baseline)) = session.run {
+        if case .bakeoff(.watchable(let target, let baseline), _) = session.run {
             let since = clock.now
             session.rivalWatch = Task {
                 await RivalWatch.observe(target, baseline: baseline, since: since, timeout: Self.rivalTimeout)
@@ -446,7 +440,7 @@ final class Coordinator {
             log.notice("session: transcribe \(timing.transcribe.milliseconds) ms · polish \(timing.polish.milliseconds) ms · insert \(timing.insert.milliseconds) ms · \(Self.summary(of: outcome), privacy: .public)")
             settle(.landed(outcome, delivered, timing, app: session.appName))
 
-        case .bakeoff(let bakeoffTarget):
+        case .bakeoff(let bakeoffTarget, let expected):
             phase = .finishing(session, .watchingRival)
             overlay.render(.working(FinishingStep.watchingRival.label))
             let ours = timing.transcribe + timing.polish
@@ -456,12 +450,7 @@ final class Coordinator {
             case .unobservable: rival = .unobservable
             }
             lastTiming = timing
-            let record = BakeoffRecord(app: session.appName, engine: session.rules.engine.wireKey, spoken: delivered.spoken, ours: delivered.text, oursMs: ours.milliseconds, rival: rival)
-            do {
-                try bakeoffLog.append(record)
-            } catch {
-                log.error("finish: bakeoff log failed: \(String(describing: error))")
-            }
+            bakeoff.append(BakeoffRecord(app: session.appName, engine: session.rules.engine.wireKey, expected: expected, spoken: delivered.spoken, ours: delivered.text, oursMs: ours.milliseconds, rival: rival))
             log.notice("bakeoff: ours \(ours.milliseconds) ms · rival \(Self.summary(of: rival), privacy: .public)")
             settle(.compared(delivered, ours: ours, rival: rival, app: session.appName))
         }
@@ -570,42 +559,9 @@ final class Coordinator {
             availableLocales = await SpeechAnalyzerTranscriber.supportedLocales()
                 .sorted { $0.displayName < $1.displayName }
         }
-        controlTimer = Timer.scheduledTimer(withTimeInterval: Self.controlPollInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.applyPendingControl() }
-        }
         let granted = await Permissions.request()
         log.notice("bootstrap: microphone=\(granted.microphone) accessibility=\(granted.accessibility) inputMonitoring=\(granted.inputMonitoring)")
         capture.prepare()
-    }
-
-    private func applyPendingControl() {
-        switch phase {
-        case .idle, .settled: break
-        case .listening, .finishing: return   // a session runs under press-time rules; leave the request pending
-        }
-        guard let control = bridge.consumePendingControl() else { return }
-        if let key = control.engine, key != settings.engine.wireKey {
-            if let requested = Engine(wireKey: key) {
-                log.notice("applyPendingControl: arena set engine → \(key, privacy: .public)")
-                select(engine: requested)
-            } else {
-                log.error("applyPendingControl: unknown engine key rejected")
-            }
-        }
-        if let raw = control.mode, let mode = AppMode(rawValue: raw), mode != settings.mode {
-            log.notice("applyPendingControl: arena set mode → \(raw, privacy: .public)")
-            set(mode: mode)
-        }
-    }
-
-    private func publishStatus() {
-        bridge.publish(ArenaStatus(
-            engine: settings.engine.wireKey,
-            engineLabel: settings.engine.label,
-            mode: settings.mode.rawValue,
-            locale: settings.locale.identifier,
-            polish: settings.polish.rawValue
-        ))
     }
 
     private func startGesture() {

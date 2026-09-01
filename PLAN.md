@@ -264,3 +264,4 @@ Each milestone is a working product.
 
 - Full pre-release pass done: 7-agent code review (~90 findings) → DESIGN-REVIEW.md (concept + data-structure blueprint) → refactor executed. Engine reified, sessions atomic under press-time rules, secure fields block capture, logs content-free, arena localhost-only with validated control and pinned scoring refs. All builds green; 15 arena scoring tests pass; permission grants survive rebuilds via hearsay-dev cert.
 - Remaining before public release: Developer ID + hardened runtime + notarization (bundle.sh warns), Parakeet engine (one Engine case + FluidAudio), dictionary concept for jargon accuracy.
+- 2026-09-01: bake-off moved into the app (settings window pane); web arena, ArenaBridge and refs sidecar deleted; scorer ported to Swift with a real test target (`swift test`).

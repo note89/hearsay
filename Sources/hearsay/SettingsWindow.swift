@@ -8,6 +8,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case dictation = "Dictation"
     case dictionary = "Dictionary"
     case style = "Style"
+    case bakeoff = "Bake-off"
     case history = "History"
 
     var id: String { rawValue }
@@ -17,6 +18,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .dictation: return "mic"
         case .dictionary: return "character.book.closed"
         case .style: return "textformat"
+        case .bakeoff: return "flag.checkered"
         case .history: return "clock"
         }
     }
@@ -39,6 +41,7 @@ struct SettingsWindowView: View {
                     case .dictation: DictationPane(coordinator: coordinator)
                     case .dictionary: DictionaryPane(coordinator: coordinator)
                     case .style: StylePane(coordinator: coordinator)
+                    case .bakeoff: BakeoffPane(coordinator: coordinator)
                     case .history: HistoryPane(coordinator: coordinator)
                     }
                 }
@@ -52,7 +55,7 @@ struct SettingsWindowView: View {
     }
 }
 
-private struct PaneHeader: View {
+struct PaneHeaderShared: View {
     let title: String
     let subtitle: String
 
@@ -72,7 +75,7 @@ private struct DictationPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            PaneHeader(title: "Dictation", subtitle: "Hold fn+shift anywhere. Release, and the words land at your cursor.")
+            PaneHeaderShared(title: "Dictation", subtitle: "Hold fn+shift anywhere. Release, and the words land at your cursor.")
 
             Text("ENGINE").font(.caption.bold()).foregroundStyle(.secondary)
             ForEach(Engine.all, id: \.wireKey) { engineOption in
@@ -212,7 +215,7 @@ private struct DictionaryPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            PaneHeader(title: "Dictionary", subtitle: "Names and jargon, spelled your way. Entries are only ever added by you.")
+            PaneHeaderShared(title: "Dictionary", subtitle: "Names and jargon, spelled your way. Entries are only ever added by you.")
 
             HStack(spacing: 8) {
                 TextField("word or phrase", text: $newFrom).textFieldStyle(.roundedBorder)
@@ -304,7 +307,7 @@ private struct StylePane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            PaneHeader(title: "Style", subtitle: "How much cleanup every dictation gets. All of it runs on this Mac.")
+            PaneHeaderShared(title: "Style", subtitle: "How much cleanup every dictation gets. All of it runs on this Mac.")
 
             HStack(alignment: .top, spacing: 12) {
                 CleanupCard(
@@ -394,7 +397,7 @@ private struct HistoryPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            PaneHeader(title: "History", subtitle: "The trash of dictation — whatever didn't land is still here. Plain file, local, yours.")
+            PaneHeaderShared(title: "History", subtitle: "The trash of dictation — whatever didn't land is still here. Plain file, local, yours.")
 
             HStack {
                 Toggle("Keep history", isOn: Binding(

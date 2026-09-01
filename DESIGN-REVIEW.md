@@ -161,3 +161,13 @@ UI is a mapping, not a concept. Audit of current mappings:
 - **history**: per-record delete unreachable. Repair: list UI with copy/delete/clear.
 - **engine/keys/permissions**: scattered submenus → one Dictation pane; menu bar keeps quick controls.
 Window sections = concepts, not features: Dictation · Dictionary · Style · History.
+
+## Part 5 — Bake-off moves in-app (2026-09-01)
+
+Moving the comparison mapping into the settings window deletes two mechanisms that existed only to span
+processes: the ArenaBridge (status/control files + polling — the app and its UI are now the same process)
+and the pinned-refs sidecar (the app knows the on-screen sentence at press, so each BakeoffRecord carries
+its own `expected` — alignment is a fact on the record, not reconstruction). The scorer ports to Swift in
+the Bakeoff module with a real test target; the dictation target is a text field in our own window, which
+is a normal AX field to both contenders. The web arena, its server, and its escape-rot test harness are
+deleted rather than kept as a second mapping.

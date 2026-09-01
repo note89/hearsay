@@ -40,18 +40,13 @@ Re-grant the three permissions one last time after that.
 
 ## Bake-off against Wispr Flow (same audio, same key-up, one clock)
 
-Both apps listen for **fn+shift** with listen-only event taps and both can hold the mic, so one hold feeds
-identical audio to both. What would collide is insertion — so hearsay has a mode where it *never inserts*:
-it watches the field through accessibility, detects the moment Wispr's text lands, and logs both texts and
-both latencies measured from the same release.
-
-1. Menu bar → **Bake-off mode** on. (hearsay's pill moves up so Wispr's stays visible.)
-2. Cursor in **TextEdit** or **Notes** (native text views — Electron/web fields are unreadable via accessibility).
-3. Read `scripts/bakeoff-sentences.txt` line by line, one hold each. Switch hearsay's language before the Swedish/Portuguese blocks.
-4. The page scores live: per-sentence word error rate + latency for both, per-engine means, verdict.
-
-Records: `~/Library/Application Support/hearsay/bakeoff.jsonl`. "ours ms" is release → text ready
-(transcribe + polish); insertion adds ~5 ms via accessibility or ~250 ms via paste.
+Menu bar → Open hearsay… → **Bake-off**. Both apps listen for fn+shift and share the microphone, so one
+hold feeds identical audio to both. In bake-off mode hearsay never inserts — it watches the pane's text
+box (a normal field, which Wispr types into), captures the rival's text and latency on the same clock,
+and scores both against the on-screen script sentence. Each record stores the sentence it was a take of,
+so retakes can't shift the scoring. Word error rate is computed over normalized tokens — numeral style,
+units, ordinals and contractions never count as errors ("5ms" ≡ "five milliseconds"). Records live in
+`~/Library/Application Support/hearsay/bakeoff.jsonl`; **Reset run** archives them.
 
 ## Cloud comparison engines & API keys
 
