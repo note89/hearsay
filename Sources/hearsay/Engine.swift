@@ -62,6 +62,15 @@ enum Engine: Equatable {
         return KeyStore.value(requiredKey) != nil
     }
 
+    /// One-line card subtitle for the settings window.
+    var detail: String {
+        switch self {
+        case .appleLocal: return "SpeechAnalyzer on this Mac · works offline · $0"
+        case .openRouter(let model): return model.contains("lite") ? "Google cloud via OpenRouter · ~$0.50 per 100k words" : "Google cloud via OpenRouter · ~$1.85 per 100k words"
+        case .elevenLabsScribe: return "ElevenLabs cloud · dedicated ASR · ~$2.80 per 100k words"
+        }
+    }
+
     var privacyClass: PrivacyClass {
         switch self {
         case .appleLocal: return .onDevice

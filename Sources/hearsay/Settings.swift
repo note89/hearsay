@@ -3,7 +3,8 @@ import Observation
 
 enum PolishMode: String {
     case off
-    case local
+    case light
+    case full
 }
 
 enum AppMode: String {
@@ -53,7 +54,7 @@ final class Settings {
     init() {
         let defaults = UserDefaults.standard
         locale = Locale(identifier: defaults.string(forKey: Key.locale) ?? Self.defaultLocale)
-        polish = PolishMode(rawValue: defaults.string(forKey: Key.polish) ?? "") ?? .local
+        polish = PolishMode(rawValue: defaults.string(forKey: Key.polish) ?? "") ?? .full
         mode = AppMode(rawValue: defaults.string(forKey: Key.mode) ?? "") ?? .dictate
         engine = defaults.string(forKey: Key.engine).flatMap(Engine.init(wireKey:)) ?? .appleLocal
         historyEnabled = defaults.object(forKey: Key.history) as? Bool ?? true

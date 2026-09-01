@@ -271,7 +271,7 @@ function renderCard() {
   const key = status ? status.engine : "apple-local";
   const e = ENGINES[key] || { name: key, model: key, runs: "cloud", price: "?", privacy: "audio uploaded" };
   document.getElementById("engineState").textContent = status
-    ? status.locale + " · polish " + (status.polish === "off" ? "off" : "on") + " · " + (status.mode === "bakeoff" ? "bake-off" : "⚠ dictate mode")
+    ? status.locale + " · polish " + status.polish + " · " + (status.mode === "bakeoff" ? "bake-off" : "⚠ dictate mode")
     : "app not running?";
   document.getElementById("m-model").textContent = e.model;
   document.getElementById("m-runs").textContent = e.runs;

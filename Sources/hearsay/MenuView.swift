@@ -5,8 +5,14 @@ import Transcription
 
 struct MenuView: View {
     let coordinator: Coordinator
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        Button("Open hearsay…") {
+            openWindow(id: "settings")
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        Divider()
         Text(statusLine)
         if let timing = coordinator.lastTiming {
             Text("last: \(timing.transcribe.milliseconds) ms transcribe · \(timing.polish.milliseconds) ms polish · \(timing.insert.milliseconds) ms insert")
@@ -33,10 +39,15 @@ struct MenuView: View {
             Divider()
             Button("API Keys…") { NSWorkspace.shared.open(KeyStore.ensureFile()) }
         }
-        Toggle("Polish on-device", isOn: Binding(
-            get: { coordinator.settings.polish == .local },
-            set: { coordinator.set(polish: $0 ? .local : .off) }
-        ))
+        Menu("Cleanup: \(coordinator.settings.polish.rawValue)") {
+            ForEach([PolishMode.off, .light, .full], id: \.rawValue) { mode in
+                Button {
+                    coordinator.set(polish: mode)
+                } label: {
+                    Text((coordinator.settings.polish == mode ? "✓ " : "    ") + mode.rawValue)
+                }
+            }
+        }
         Toggle("Field context — read around the cursor (on-device)", isOn: Binding(
             get: { coordinator.settings.fieldContextEnabled },
             set: { coordinator.set(fieldContextEnabled: $0) }
@@ -49,6 +60,9 @@ struct MenuView: View {
         Divider()
         permissionsMenu
         historyMenu
+        if let last = coordinator.history.records.first {
+            Button("Copy last dictation") { coordinator.copy(record: last) }
+        }
         Divider()
         Button("Relaunch") { Relaunch.now() }
         Button("Quit hearsay") { NSApp.terminate(nil) }

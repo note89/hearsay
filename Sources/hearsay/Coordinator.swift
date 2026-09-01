@@ -219,6 +219,10 @@ final class Coordinator {
         history.clear()
     }
 
+    func deleteHistory(record: DictationRecord) {
+        history.delete(id: record.id)
+    }
+
     func copy(record: DictationRecord) {
         Inserter.copyToClipboard(record.delivered)
     }
@@ -229,6 +233,14 @@ final class Coordinator {
 
     func openDictionary() {
         NSWorkspace.shared.open(Lexicon.ensureFile(at: dictionaryURL))
+    }
+
+    func loadDictionaryEntries() -> [LexiconEntry] {
+        Lexicon.entries(from: Lexicon.ensureFile(at: dictionaryURL))
+    }
+
+    func saveDictionaryEntries(_ entries: [LexiconEntry]) {
+        Lexicon.save(entries, to: dictionaryURL)
     }
 
     // MARK: - Engine
@@ -396,7 +408,7 @@ final class Coordinator {
         }
 
         var delivered = InsertableText.raw(raw)
-        if session.rules.polish == .local {
+        if session.rules.polish != .off {
             phase = .finishing(session, .polishing)
             overlay.render(.working(FinishingStep.polishing.label))
             let polishStart = clock.now
@@ -404,8 +416,9 @@ final class Coordinator {
             let style = session.rules.style
             let text = raw.text
             let context = PolishContext(fieldText: session.rules.fieldContext, terms: session.rules.lexicon.terms)
+            let intensity: PolishIntensity = session.rules.polish == .light ? .light : .full
             let verdict: PolishVerdict = await Self.race(timeout: Self.polishTimeout) { () -> PolishVerdict in
-                await polisher.polish(text, style: style, context: context)
+                await polisher.polish(text, style: style, intensity: intensity, context: context)
             } ?? PolishVerdict.keepRaw(.timeout)
             switch verdict {
             case .accept(let polished): delivered = .polished(polished, spoken: raw)

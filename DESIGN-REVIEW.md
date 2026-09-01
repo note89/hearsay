@@ -145,3 +145,19 @@ garbage. `polish` crosses as `rawValue` string like `mode` (information preserva
 6. **P1 mechanicals**: timeout/cancellation cluster, RivalWatch cancellability + AX timeout, gesture
    delivery synchronous, URLSession timeouts, polish timeout, capture/tap re-entry guards.
 7. **F7 arena sidecar** + arena perf/robustness fixes; delete bakeoff-report.py.
+
+## Part 4 — Settings window (mapping review, 2026-09-01)
+
+UI is a mapping, not a concept. Audit of current mappings:
+- **dictionary**: fails familiarity — the familiar mapping is a searchable list with add/delete (Wispr, system
+  dictionaries); ours was a text editor. Repair: a list UI as a *second mapping over the same file* —
+  dictionary.txt stays the source of truth, the window reads/writes it (bookkeeping sync, reload on focus).
+- **polish**: fails "relevant state visible" — the user cannot see what polish will do. Repair stolen from
+  Wispr's Style screen: cleanup-level cards showing the same sample utterance rendered per level.
+- **polish (MIRO)**: `PolishMode {off, local}` was overloaded — "local" bundled *whether* with *how much*.
+  Now `off | light | full`: light = written form only (punctuation, fillers, self-corrections, wording kept);
+  full = intent-dense (the decided philosophy). Module-level `PolishIntensity {light, full}`; "off" is the
+  caller not calling.
+- **history**: per-record delete unreachable. Repair: list UI with copy/delete/clear.
+- **engine/keys/permissions**: scattered submenus → one Dictation pane; menu bar keeps quick controls.
+Window sections = concepts, not features: Dictation · Dictionary · Style · History.

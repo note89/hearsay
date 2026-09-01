@@ -9,6 +9,9 @@ struct HearsayApp: App {
         MenuBarExtra("hearsay", systemImage: "waveform") {
             MenuView(coordinator: delegate.coordinator)
         }
+        Window("hearsay", id: "settings") {
+            SettingsWindowView(coordinator: delegate.coordinator)
+        }
     }
 }
 

@@ -66,6 +66,15 @@ Menu bar → Engine → **API Keys…** opens `~/Library/Application Support/hea
 chmod 600). Environment variables and an `export` line in `~/.zshrc` also work. Engines without a key show
 "needs key" in the menu and stay disabled. Note: ElevenLabs is *not* reachable via OpenRouter — separate key.
 
+## The hearsay window
+
+Menu bar → **Open hearsay…** for the full UI: engine cards (privacy-tagged, key-aware), language,
+field-context toggle and permission status under **Dictation**; a searchable add/delete **Dictionary**
+list (the plain text file stays the source of truth — both stay in sync); **Style** with three cleanup
+levels shown as example outputs — Off / Light (punctuation and fillers, your wording kept) / Full
+(intent-dense, the default) — plus the app→tone table; and **History** with per-record copy/delete.
+The menu bar menu keeps the quick controls.
+
 ## Field context & dictionary
 
 - **Field context** (menu toggle, default on): at press, hearsay reads ~600 chars around your cursor via

@@ -9,6 +9,14 @@ public struct PolishedText: Equatable, Sendable {
     }
 }
 
+/// How far polish may go. "Off" is the caller not calling.
+public enum PolishIntensity: Sendable {
+    /// Written form only: punctuation, capitalization, fillers, explicit self-corrections. Wording kept.
+    case light
+    /// Intent-faithful and dense: rephrase, densify, retro-correct mishearings, structure.
+    case full
+}
+
 public enum WritingStyle: String, Sendable {
     case plain
     case chat
@@ -45,7 +53,7 @@ public struct PolishContext: Sendable {
 }
 
 public protocol Polisher {
-    func polish(_ spoken: String, style: WritingStyle, context: PolishContext) async -> PolishVerdict
+    func polish(_ spoken: String, style: WritingStyle, intensity: PolishIntensity, context: PolishContext) async -> PolishVerdict
 }
 
 /// DECISION_POLISH_GUARD (Nils, 2026-08-31): polish is intent-faithful, not word-faithful —

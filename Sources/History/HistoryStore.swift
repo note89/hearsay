@@ -46,6 +46,11 @@ public final class HistoryStore {
         save()
     }
 
+    public func delete(id: UUID) {
+        records.removeAll { $0.id == id }
+        save()
+    }
+
     public func record(_ record: DictationRecord) {
         records.insert(record, at: 0)
         if records.count > cap { records.removeLast(records.count - cap) }
