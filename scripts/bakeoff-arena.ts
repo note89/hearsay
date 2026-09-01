@@ -172,7 +172,7 @@ const PAGE = `<!doctype html>
   <tr><td class="lbl">MODEL</td><td class="oc" id="m-model"></td><td>proprietary cloud STT + LLM</td></tr>
   <tr><td class="lbl">RUNS ON</td><td class="oc" id="m-runs"></td><td>Baseten · OpenAI · Anthropic · Cerebras · AWS</td></tr>
   <tr><td class="lbl">PRICE</td><td class="oc" id="m-price"></td><td>$144/yr · ≈ $1.32 per 1k words spoken</td></tr>
-  <tr><td class="lbl">PRIVACY</td><td class="oc" id="m-privacy"></td><td>audio + window screenshots uploaded</td></tr>
+  <tr><td class="lbl">PRIVACY</td><td class="oc" id="m-privacy"></td><td>audio + surrounding field text + app identity uploaded (screenshot per dictation if enabled)</td></tr>
 </table></div>
 <div class="banner" id="modeBanner"></div>\n<div class="banner" id="banner"></div>
 <div class="prompt"><div class="idx" id="idx"></div><div class="text" id="sentence">loading…</div></div>

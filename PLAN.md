@@ -6,7 +6,7 @@ Working title. Purpose in one sentence: **hold a key, speak, release, and the wo
 
 - Cloud-only. Every utterance is uploaded; no on-device mode at any tier. Requires internet.
 - Proprietary models, not Whisper. Subprocessors listed: Baseten, OpenAI, Anthropic, Cerebras, AWS.
-- "Context awareness" = periodic screenshots of the active window, uploaded. 2025 privacy incident over exactly this.
+- "Context awareness" = surrounding textbox contents + app identity uploaded with every dictation regardless of the toggle; screen OCR/screenshot once per dictation when enabled (AX context defaults on). The widely-blogged "screenshots every few seconds + CTO apology" story traces to competitor marketing — the binary contradicts it.
 - Privacy Mode only zeroes server-side retention; audio still leaves the device.
 
 So the friend's claim ("can't build a comparable experience") is really "can't match cloud models locally." That is the bet, and the 2026 on-device stack makes it winnable:
