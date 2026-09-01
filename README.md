@@ -1,91 +1,121 @@
-# hearsay
+<p align="center">
+  <img src="docs/logo.png" width="128" alt="hearsay logo">
+</p>
 
-Hold **fn+shift**, speak, release. The words land where your cursor was. Nothing leaves the Mac.
+<h1 align="center">hearsay</h1>
 
-- Speech → text: Apple `SpeechAnalyzer` (macOS 26, on-device, Neural Engine)
-- Cleanup: Apple `FoundationModels` (on-device ~3B LLM), guarded so it can't change your meaning
-- Insert: accessibility API → clipboard-paste fallback; failures land in History (menu bar) and on the clipboard
+<p align="center"><b>Hold fn+shift. Speak. Release.</b><br>
+The words land where your cursor was — and the audio never left your Mac.</p>
 
-See `PLAN.md` for the concept design and the bet against Wispr Flow.
+<p align="center">
+  <a href="https://github.com/note89/hearsay/releases"><img src="https://img.shields.io/github/v/release/note89/hearsay?include_prereleases&label=release" alt="release"></a>
+  <img src="https://img.shields.io/badge/macOS-26%2B-black" alt="macOS 26+">
+  <img src="https://img.shields.io/badge/audio-never%20leaves%20the%20Mac-2ea44f" alt="on-device">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue" alt="GPLv3"></a>
+</p>
 
-## Run
+---
+
+Push-to-talk dictation for macOS, built to beat the cloud subscription apps at their own game:
+
+- **On-device by default** — Apple's SpeechAnalyzer (Neural Engine) for speech, Apple's on-device LLM for cleanup. No account, no subscription, no network. $0.
+- **Cleanup that writes what you meant** — punctuation, fillers gone, self-corrections applied, dense phrasing, dash lists, per-app tone (chat/email/code/Markdown). Three levels: Off / Light / Full.
+- **A built-in bake-off lab** — run Wispr Flow (or any rival) side by side on identical audio and get word-error-rate + latency scoreboards, measured honestly.
+
+## Install
+
+**Download**: grab `hearsay-x.y.z.zip` from [Releases](https://github.com/note89/hearsay/releases), unzip, drag `hearsay.app` to `/Applications`.
+
+> The app is signed with a local certificate, not a paid Apple Developer ID — macOS will refuse the first
+> launch. Either **right-click → Open → Open**, or:
+> ```sh
+> xattr -dr com.apple.quarantine /Applications/hearsay.app
+> ```
+
+**Or build from source** (Command Line Tools 26+ is enough — no Xcode):
 
 ```sh
-scripts/run.sh          # build → build/hearsay.app → launch (waveform icon in menu bar)
-scripts/logs.sh         # live timings: transcribe / polish / insert in ms
+softwareupdate -i "Command Line Tools for Xcode 26.6-26.6"   # once, if you don't have CLT 26+
+git clone https://github.com/note89/hearsay && cd hearsay
+scripts/bundle.sh && open build/hearsay.app
 ```
 
-Requires Command Line Tools 26+ (`softwareupdate -i "Command Line Tools for Xcode 26.6-26.6"`). No Xcode needed.
+Building repeatedly? Run `scripts/fix-permissions.sh` once — it creates a stable local signing
+certificate so macOS permission grants survive rebuilds.
 
-## First launch — three permissions
+## First run — three permissions
 
-macOS asks once per app signature:
+macOS asks once: **Microphone** (the prompt), then enable *hearsay* under **Accessibility** and
+**Input Monitoring** (System Settings → Privacy & Security). Then menu bar → Relaunch. The menu
+shows a "⚠ Fix permissions…" row until everything is granted.
 
-1. **Microphone** — click Allow on the prompt.
-2. **Accessibility** — System Settings → Privacy & Security → Accessibility → enable *hearsay*.
-3. **Input Monitoring** — same place → Input Monitoring → enable *hearsay*.
+If your fn key is bound to "Change Input Source" or emoji, that's fine — the hotkey is the
+**fn+shift chord**, which doesn't collide.
 
-Then menu bar → **Relaunch**. Status line should read "hold fn+shift to dictate".
+## Using it
 
-## Stable signature (do once, or you re-grant after every rebuild)
+Put the cursor anywhere you can type. **Hold fn+shift, talk, release.** A small pill shows live
+transcription; on release the cleaned text lands at your cursor. Everything else lives in the
+menu bar → **Open hearsay…** window:
 
-Ad-hoc signatures change on every build, and macOS keys permissions to the signature. Create and trust a local self-signed certificate (one command does both, asks for your password once):
+| Pane | What's there |
+|---|---|
+| **Dictation** | engine cards, language (only when the engine needs one), field context toggle, permissions |
+| **Dictionary** | your terms (`mprocs`) and rewrites (`mprox → mprocs`) — a plain text file underneath |
+| **Style** | cleanup level with example outputs; the app→tone table |
+| **Bake-off** | the comparison lab — see below |
+| **History** | every dictation that didn't land, recoverable; per-record delete, clear, off-switch |
 
-```sh
-scripts/fix-permissions.sh
-```
+## Engines
 
-Next `scripts/run.sh` signs with it; the first time, macOS asks whether `codesign` may use the key — choose **Always Allow**.
-Re-grant the three permissions one last time after that.
+| Engine | Runs | Cost | Language |
+|---|---|---|---|
+| **Apple on-device** (default) | this Mac, offline | $0 | picked by you (no auto-detect) |
+| ElevenLabs Scribe | ElevenLabs cloud | ~$2.80 / 100k words | automatic |
+| Gemini 2.5 Flash‑Lite / Flash | Google via OpenRouter | ~$0.50 – $1.85 / 100k words | automatic |
 
-## Bake-off against Wispr Flow (same audio, same key-up, one clock)
+Cloud engines are optional comparison tools: menu → Engine → **API Keys…** opens
+`~/Library/Application Support/hearsay/keys.env` (0600, template included). `OPENROUTER_API_KEY`
+unlocks both Geminis; `ELEVEN_LABS_API_KEY` unlocks Scribe. ElevenLabs is not reachable via
+OpenRouter — separate key.
 
-Menu bar → Open hearsay… → **Bake-off**. Both apps listen for fn+shift and share the microphone, so one
-hold feeds identical audio to both. In bake-off mode hearsay never inserts — it watches the pane's text
-box (a normal field, which Wispr types into), captures the rival's text and latency on the same clock,
-and scores both against the on-screen script sentence. Each record stores the sentence it was a take of,
-so retakes can't shift the scoring. Word error rate is computed over normalized tokens — numeral style,
-units, ordinals and contractions never count as errors ("5ms" ≡ "five milliseconds"). Records live in
-`~/Library/Application Support/hearsay/bakeoff.jsonl`; **Reset run** archives them.
+## Privacy, precisely
 
-## Cloud comparison engines & API keys
+- Apple engine: audio, transcript, field context — nothing leaves the Mac.
+- The cleanup model **always** runs on-device, so field context and dictionary terms are never
+  uploaded even when a cloud transcription engine is selected.
+- Secure (password) fields: dictation is blocked before the microphone even starts.
+- The system log gets timings and outcomes, never content. History is 0600, cappable, clearable,
+  optional. Clipboard writes are marked transient so clipboard managers skip them.
+- Cloud engines upload exactly one thing: the utterance WAV, to the provider you picked.
 
-The default engine is Apple, fully on-device, no key, no network. The optional comparison engines need keys:
+## The bake-off
 
-| Engine | Key | Get it |
-|---|---|---|
-| OpenRouter · Gemini Flash-Lite / Flash | `OPENROUTER_API_KEY` | https://openrouter.ai/keys |
-| ElevenLabs · Scribe | `ELEVEN_LABS_API_KEY` | https://elevenlabs.io |
-
-Menu bar → Engine → **API Keys…** opens `~/Library/Application Support/hearsay/keys.env` (created with a template,
-chmod 600). Environment variables and an `export` line in `~/.zshrc` also work. Engines without a key show
-"needs key" in the menu and stay disabled. Note: ElevenLabs is *not* reachable via OpenRouter — separate key.
-
-## The hearsay window
-
-Menu bar → **Open hearsay…** for the full UI: engine cards (privacy-tagged, key-aware), language,
-field-context toggle and permission status under **Dictation**; a searchable add/delete **Dictionary**
-list (the plain text file stays the source of truth — both stay in sync); **Style** with three cleanup
-levels shown as example outputs — Off / Light (punctuation and fillers, your wording kept) / Full
-(intent-dense, the default) — plus the app→tone table; and **History** with per-record copy/delete.
-The menu bar menu keeps the quick controls.
+Open hearsay… → **Bake-off**, run Wispr Flow alongside, and read the script sentences. Both apps
+hear the same audio from the same key-up; hearsay never inserts while the pane is front — it watches
+the pane's text box for the rival's output and scores both against the on-screen sentence:
+word-level diffs, WER (numeral style, units, ordinals and contractions never count as errors),
+latency on one clock, per-engine scoreboards. Each record stores the sentence it was a take of, so
+retakes can't corrupt a run. `Reset run` archives to
+`~/Library/Application Support/hearsay/bakeoff.jsonl` archives.
 
 ## Field context & dictionary
 
-- **Field context** (menu toggle, default on): at press, hearsay reads ~600 chars around your cursor via
-  accessibility and hands them to the *on-device* polish model as terminology reference. Because polish always
-  runs locally, this context never leaves the Mac — even when a cloud transcription engine is selected. It is
-  never logged and never stored.
-- **Dictionary** (menu → Dictionary…): a plain text file, one entry per line. `mprocs` = prefer this exact
-  spelling; `mprox -> mprocs` = deterministic rewrite applied after polish (works even with polish off).
-  Entries are only ever added by you — hearsay never learns words behind your back.
+- **Field context** (default on): ~600 chars around your cursor go to the *on-device* cleanup model
+  as terminology reference — the accuracy trick cloud apps upload your screen for, done locally.
+- **Dictionary**: terms bias the cleanup toward exact spellings; `from -> to` rewrites apply
+  deterministically even with cleanup off. Nothing is ever learned behind your back.
 
 ## Where the decisions live
 
-- `Sources/Insertion/Inserter.swift` → `Inserter.strategies(for:)` — which insertion strategies, in which order, per target (`DECISION_INSERTION_POLICY`)
-- `Sources/Polish/Polisher.swift` → `PolishGuard.verdict(spoken:candidate:)` — when the cleanup model "changed your meaning" and we keep the raw transcript (`DECISION_POLISH_GUARD`)
-- `Sources/hearsay/StyleInference.swift` — which apps get chat / email / code style
-- `Sources/Utterance/HoldGestureMonitor.swift` → `ModifierChord.fnShift` — the hotkey
+- `Sources/Insertion/Inserter.swift` → `strategies(for:)` — insertion strategy order (`DECISION_INSERTION_POLICY`)
+- `Sources/Polish/Polisher.swift` → `PolishGuard` — when cleanup "changed your meaning" and raw wins (`DECISION_POLISH_GUARD`)
+- `Sources/hearsay/StyleInference.swift` — which apps get which tone
+- `Sources/hearsay/Engine.swift` — one type owns every engine; a new engine is one new case
+
+Design history: [PLAN.md](PLAN.md) (the original concept design and the bet that started this),
+[DESIGN-REVIEW.md](DESIGN-REVIEW.md) (concept & data-structure reviews that shaped the refactors).
+Scorer tests: `swift run bakeoff-tests`.
 
 ## License
 
