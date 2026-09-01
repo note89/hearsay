@@ -171,3 +171,45 @@ its own `expected` — alignment is a fact on the record, not reconstruction). T
 the Bakeoff module with a real test target; the dictation target is a text field in our own window, which
 is a normal AX field to both contenders. The web arena, its server, and its escape-rot test harness are
 deleted rather than kept as a second mapping.
+
+## Part 6 — Full review, round 2 (2026-09-01, post-refactor)
+
+Seven parallel reviewers (types/states, concepts, concurrency, modularity, naming, security, scorer
+algorithmics) over the current tree. All Part-2/3 repairs verified held, with one exception: the
+Bakeoff→Insertion module import was never repaired. Handled during the review itself: the scorer's
+digit-apostrophe-letter infinite recursion (reproduced SIGSEGV — "90's" crashed the app), typographic
+apostrophes penalizing every contraction, and the wer/diff dual-pipeline divergence — fixed, +10 tests.
+Refuted by direct probe: same-pid AX reads from our own main thread are instant (0 ms), so the in-app
+arena's self-watching design is sound on this OS.
+
+Standing findings, priority order:
+
+P1 — behavior:
+1. Cloud engines receive the hidden Apple locale (Scribe `language_code`, Gemini prompt hint) while the
+   UI claims "automatic" — integrity violation; omit the hint for cloud engines.
+2. Bake-off mode inference rests on a cached view flag + `NSApp.isActive` (two clocks, onDisappear
+   latch, sidebar-focus hole). Ground truth instead: bake-off iff the armed element is our own process
+   (same arm() snapshot the session uses).
+3. comparison lacks a retake action — one fumbled take permanently pollutes a run; add "Retake last".
+4. Reset-run during an in-flight session shifts the new run's alignment — runID snapshot or disable.
+5. Missing key overwrites the persisted engine choice — resolve availability per session instead.
+6. Mid-hold focus drift to a password field discards the whole dictation — over-suppression; the
+   press-time context is the sensitivity authority: copy + history like any lost target.
+7. session.partial frozen at key-up (finishing-phase partials dropped) — salvage loses post-release text.
+8. Stale Apple model-download failure can overwrite a healthy cloud engine's ready status.
+9. Tap re-enable after timeout can miss the chord release — mic stuck listening; resync from live flags.
+10. Privacy hygiene: repair support-dir/file perms at init and purge arena-era orphans; Reset run
+    archives forever (uncapped, outside every deletion path); `keepRaw(.failed(...))` logs a
+    content-bearing error string as public; `sh -c` path interpolation in Relaunch.
+11. Dictionary terms silently do nothing when Style is Off or the guard rejects — disclose in the pane;
+    field-context toggle likewise inert with polish off (it is state of polish; map it there).
+12. Cloud sessions are visually identical to local ones mid-dictation — overlay badge for privacyClass.
+
+P2 — structure: drop SessionRules.mode (Run is the truth); parse ArmResult into a DictationDestination;
+split InsertionBlock's illegal cross-product; failed outcome carries app+mode; rewritten wraps its base;
+BakeoffRecord decoding parses into a legal union; Lexicon preserves hand comments or drops the promise;
+RivalWatch takes a reader closure (kills Bakeoff→Insertion); Engine gets OpenRouterModel enum,
+exhaustive needsLocale, a provisioning story for Parakeet, and a model+price table; availability reads
+become a snapshot; RunSummary moves scoring math out of the view into tested module code; support-dir
+and bundle-id each get one definition; naming batch (BakeoffStore file, arenaText, Run/SessionPlan,
+EngineGroup sums, PaneHeader, statusLine truth predicate) and stale docs (README menu paths, PLAN).
