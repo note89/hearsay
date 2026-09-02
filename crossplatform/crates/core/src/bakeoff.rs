@@ -31,6 +31,9 @@ pub const SCRIPT: &[BakeoffSentence] = &[
     BakeoffSentence { text: "Kan du pusha branchen till GitHub innan standupen imorgon?", language: "sv-SE" },
     BakeoffSentence { text: "Fakturan är på tolvtusen kronor exklusive moms.", language: "sv-SE" },
     BakeoffSentence { text: "Boka två biljetter till Lissabon den fjortonde september.", language: "sv-SE" },
+    BakeoffSentence { text: "Kan du merga branchen innan lunch? The CI is green now.", language: "sv-SE + en-US" },
+    BakeoffSentence { text: "Vi deployar till staging ikväll, so don't push anything to main after 6pm.", language: "sv-SE + en-US" },
+    BakeoffSentence { text: "Fakturan är skickad, but the accountant wants the receipts by Friday.", language: "sv-SE + en-US" },
     BakeoffSentence { text: "Olá, podes enviar a fatura de agosto até sexta-feira?", language: "pt-PT" },
     BakeoffSentence { text: "Marca dois bilhetes para Lisboa no dia catorze de setembro.", language: "pt-PT" },
 ];

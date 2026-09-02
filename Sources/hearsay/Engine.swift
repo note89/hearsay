@@ -60,7 +60,7 @@ enum Engine: Equatable {
         switch self {
         case .appleLocal: return "SpeechAnalyzer on the Neural Engine, works offline · $0"
         case .openRouter(let model): return "Google cloud via OpenRouter · \(model.pricePer100kWords)"
-        case .elevenLabsScribe: return "ElevenLabs cloud, dedicated ASR, 99 languages · ~$2.80 per 100k words"
+        case .elevenLabsScribe: return "ElevenLabs Scribe v2 cloud, dedicated ASR, 90+ languages, mixes them mid-sentence · ~$2.45 per 100k words"
         }
     }
 

@@ -7,7 +7,7 @@ public enum ElevenLabsFailure: Error {
 
 /// ElevenLabs Scribe — dedicated cloud ASR, for comparison runs. One shot at end of input.
 public final class ElevenLabsTranscriber: Transcriber {
-    public static let modelID = "scribe_v1"
+    public static let modelID = "scribe_v2"
 
     public static var keyAvailable: Bool { KeyStore.value("ELEVEN_LABS_API_KEY") != nil }
 

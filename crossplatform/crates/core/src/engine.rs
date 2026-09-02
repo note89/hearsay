@@ -73,7 +73,7 @@ pub enum Engine {
     ElevenLabsScribe,
 }
 
-pub const ELEVENLABS_MODEL_ID: &str = "scribe_v1";
+pub const ELEVENLABS_MODEL_ID: &str = "scribe_v2";
 
 impl Engine {
     pub fn all() -> Vec<Engine> {
@@ -108,7 +108,7 @@ impl Engine {
         match self {
             Engine::Whisper(m) => format!("whisper.cpp on this machine, works offline · {}", m.blurb()),
             Engine::OpenRouter(m) => format!("Google cloud via OpenRouter · {}", m.price_per_100k_words()),
-            Engine::ElevenLabsScribe => "ElevenLabs cloud, dedicated ASR, 99 languages · ~$2.80 per 100k words".to_string(),
+            Engine::ElevenLabsScribe => "ElevenLabs Scribe v2 cloud, dedicated ASR, 90+ languages, mixes them mid-sentence · ~$2.45 per 100k words".to_string(),
         }
     }
 

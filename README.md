@@ -100,7 +100,10 @@ menu bar → **Open hearsay…** window:
 | Engine | Runs | Cost | Language |
 |---|---|---|---|
 | **Apple on-device** (default) | this Mac, offline | $0 | picked by you (no auto-detect) |
-| ElevenLabs Scribe | ElevenLabs cloud | ~$2.80 / 100k words | automatic |
+| ElevenLabs Scribe v2 | ElevenLabs cloud | ~$2.45 / 100k words | automatic, mid-sentence mixing |
+
+Mixing languages mid-sentence (svengelska) works with Scribe v2 and the Gemini engines. Apple's on-device
+model is locked to one locale per dictation, so it can only do one language at a time.
 | Gemini 2.5 Flash‑Lite / Flash | Google via OpenRouter | ~$0.50 – $1.85 / 100k words | automatic |
 
 Cloud engines are optional comparison tools: Open hearsay… → **Dictation** → **API Keys…** opens
