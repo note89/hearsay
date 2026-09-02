@@ -3,3 +3,5 @@ build/
 *.xcodeproj
 .DS_Store
 scripts/hearsay-dev.pem
+crossplatform/target/
+crossplatform/sample.wav

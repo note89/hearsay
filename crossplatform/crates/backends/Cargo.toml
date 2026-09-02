@@ -1,0 +1,15 @@
+[package]
+name = "hearsay-backends"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Platform mechanisms behind hearsay's concepts: microphone, global hotkey, text insertion"
+
+[dependencies]
+hearsay-core = { path = "../core" }
+cpal.workspace = true
+global-hotkey.workspace = true
+enigo.workspace = true
+arboard.workspace = true
+log.workspace = true
+thiserror.workspace = true

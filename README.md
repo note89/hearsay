@@ -43,6 +43,35 @@ scripts/bundle.sh && open build/hearsay.app
 Building repeatedly? Run `scripts/fix-permissions.sh` once — it creates a stable local signing
 certificate so macOS permission grants survive rebuilds.
 
+### Linux & Windows
+
+`hearsay-rs` is the same product on the other two desktops: one Rust core, an egui window, whisper.cpp
+on-device. It reads and writes the same files as the Mac app (history, dictionary, bake-off runs,
+`keys.env`), so the data folder moves with you.
+
+```sh
+# Debian/Ubuntu build deps (Rust 1.85+)
+sudo apt install cmake clang libclang-dev pkg-config libasound2-dev libx11-dev libxi-dev \
+  libxtst-dev libxdo-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev
+# Windows: Visual Studio Build Tools (C++ workload) + cmake
+git clone https://github.com/note89/hearsay && cd hearsay/crossplatform
+cargo run --release -p hearsay-rs
+```
+
+First launch: Dictation → **Download model** (`ggml-base.en`, 148 MB, once). Then hold **Ctrl+Alt+Space**
+anywhere, speak, release. `hearsay-rs transcribe file.wav` runs the engine on a file.
+
+What is different from the Mac app, on purpose (the reasoning is in `PLAN-CROSSPLATFORM.md`):
+
+- Whisper is batch: text appears at key-up, no live partials in the pill.
+- Insertion is paste: it lands where the caret is, and hearsay cannot verify it. No frontmost window → clipboard.
+- No field context, no per-app tone, no secure-field detection — a dictated password would land in History, so pause History first.
+- Cleanup (Light / Full) is cloud opt-in through OpenRouter until a local model ships. Off is entirely on-device.
+- Linux global hotkeys need X11 (or XWayland); pure Wayland compositors do not expose one.
+
+Data folder: Linux `~/.local/share/hearsay`, Windows `%APPDATA%\hearsay\data`. Keys: `keys.env` in that
+folder (`NAME=value` lines) or environment variables.
+
 ## First run — three permissions
 
 macOS asks once: **Microphone** (the prompt), then enable *hearsay* under **Accessibility** and

@@ -1,0 +1,25 @@
+[package]
+name = "hearsay-engines"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Transcriber and Polisher implementations: whisper.cpp (local), OpenRouter, ElevenLabs"
+
+[features]
+default = ["local-stt"]
+# whisper.cpp builds C++ via cmake; off for cross-compile checks without a target toolchain.
+local-stt = ["dep:whisper-rs"]
+
+[dependencies]
+hearsay-core = { path = "../core" }
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+whisper-rs = { version = "0.14", optional = true }
+
+# TLS: rustls on Unix (no OpenSSL headers needed); the system store (schannel) on Windows.
+[target.'cfg(not(windows))'.dependencies]
+reqwest = { workspace = true, features = ["rustls-tls"] }
+
+[target.'cfg(windows)'.dependencies]
+reqwest = { workspace = true, features = ["native-tls"] }

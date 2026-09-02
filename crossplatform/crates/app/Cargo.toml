@@ -1,0 +1,26 @@
+[package]
+name = "hearsay-rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "hearsay for Linux and Windows — push-to-talk dictation, local by default"
+
+[[bin]]
+name = "hearsay-rs"
+path = "src/main.rs"
+
+[features]
+default = ["local-stt"]
+local-stt = ["hearsay-engines/local-stt"]
+
+[dependencies]
+hearsay-core = { path = "../core" }
+hearsay-engines = { path = "../engines", default-features = false }
+hearsay-backends = { path = "../backends" }
+hound.workspace = true
+log.workspace = true
+env_logger.workspace = true
+eframe.workspace = true
+egui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
