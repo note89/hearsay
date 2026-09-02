@@ -78,7 +78,8 @@ public final class GeminiLiveTranscriber: Transcriber {
                     if await transcript.isClosed { return }
                 }
             } catch {
-                await transcript.close()
+                let reason = socket.closeReason.flatMap { String(data: $0, encoding: .utf8) } ?? String(describing: error)
+                await transcript.fail(reason)
             }
         }
         defer { reader.cancel() }
@@ -106,7 +107,9 @@ public final class GeminiLiveTranscriber: Transcriber {
             if await transcript.nothingPending, ContinuousClock.now - ended >= drainIdleGrace { break }
             try await Task.sleep(for: pollInterval)
         }
-        return await transcript.finalText
+        let text = await transcript.finalText
+        if text.isEmpty, let failure = await transcript.failure { throw GeminiLiveFailure.socket(failure) }
+        return text
     }
 
     private enum ServerUpdate {
@@ -159,6 +162,7 @@ private actor LiveTranscript {
     private var committed: [String] = []
     private var interim = ""
     private var closed = false
+    private(set) var failure: String?
     private var ended = false
     private var commitsAfterEnd = 0
     private var lastCommit: ContinuousClock.Instant?
@@ -172,6 +176,7 @@ private actor LiveTranscript {
 
     func setInterim(_ text: String) { interim = text }
     func close() { closed = true }
+    func fail(_ reason: String) { failure = reason; closed = true }
     func audioEnded() { ended = true }
 
     var isClosed: Bool { closed }
