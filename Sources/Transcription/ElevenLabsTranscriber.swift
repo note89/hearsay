@@ -19,7 +19,7 @@ public final class ElevenLabsTranscriber: Transcriber {
         self.key = key
     }
 
-    public func transcribe(_ audio: AsyncStream<AVAudioPCMBuffer>) -> AsyncThrowingStream<TranscriptionEvent, Error> {
+    public func transcribe(_ audio: AsyncStream<AVAudioPCMBuffer>, hints: TranscriptionHints) -> AsyncThrowingStream<TranscriptionEvent, Error> {
         let key = key
         return oneShotWavTranscription(audio) { wav in try await Self.request(wav: wav, key: key) }
     }

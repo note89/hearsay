@@ -8,13 +8,13 @@ enum PrivacyClass: Equatable {
 
 /// The OpenRouter models hearsay knows how to price and label. Adding one is one case + one row.
 enum OpenRouterModel: String, CaseIterable, Equatable {
-    case geminiFlashLite = "google/gemini-2.5-flash-lite"
-    case geminiFlash = "google/gemini-2.5-flash"
+    case geminiFlashLite = "google/gemini-3.5-flash-lite"
+    case geminiFlash = "google/gemini-3.7-flash"
 
     var pricePer100kWords: String {
         switch self {
-        case .geminiFlashLite: return "~$0.50 per 100k words"
-        case .geminiFlash: return "~$1.85 per 100k words"
+        case .geminiFlashLite: return "~$0.70 per 100k words"
+        case .geminiFlash: return "~$1.45 per 100k words"
         }
     }
 }
@@ -26,9 +26,10 @@ enum Engine: Equatable {
     case appleLocal
     case openRouter(OpenRouterModel)
     case elevenLabsScribe
+    case geminiTranscribeLive
 
     static var all: [Engine] {
-        [.appleLocal, .elevenLabsScribe] + OpenRouterModel.allCases.map { .openRouter($0) }
+        [.appleLocal, .elevenLabsScribe, .geminiTranscribeLive] + OpenRouterModel.allCases.map { .openRouter($0) }
     }
 
     /// Wire key: persisted in Settings and stamped on BakeoffRecords. `init(wireKey:)` is its exact inverse.
@@ -37,6 +38,7 @@ enum Engine: Equatable {
         case .appleLocal: return "apple-local"
         case .openRouter(let model): return model.rawValue
         case .elevenLabsScribe: return "elevenlabs/\(ElevenLabsTranscriber.modelID)"
+        case .geminiTranscribeLive: return "google/\(GeminiLiveTranscriber.modelID)"
         }
     }
 
@@ -52,7 +54,8 @@ enum Engine: Equatable {
         switch self {
         case .appleLocal: return "Apple on-device ($0)"
         case .openRouter(let model): return "OpenRouter · \(model.rawValue)"
-        case .elevenLabsScribe: return "ElevenLabs · Scribe"
+        case .elevenLabsScribe: return "ElevenLabs · Scribe v2"
+        case .geminiTranscribeLive: return "Google · Gemini 3.5 Transcribe (live)"
         }
     }
 
@@ -61,6 +64,7 @@ enum Engine: Equatable {
         case .appleLocal: return "SpeechAnalyzer on the Neural Engine, works offline · $0"
         case .openRouter(let model): return "Google cloud via OpenRouter · \(model.pricePer100kWords)"
         case .elevenLabsScribe: return "ElevenLabs Scribe v2 cloud, dedicated ASR, 90+ languages, mixes them mid-sentence · ~$2.45 per 100k words"
+        case .geminiTranscribeLive: return "Google cloud, streaming ASR with live partials, 85+ languages, mixes them mid-sentence · ~$6 per 100k words, free tier in preview"
         }
     }
 
@@ -69,7 +73,7 @@ enum Engine: Equatable {
     var needsLocale: Bool {
         switch self {
         case .appleLocal: return true
-        case .openRouter, .elevenLabsScribe: return false
+        case .openRouter, .elevenLabsScribe, .geminiTranscribeLive: return false
         }
     }
 
@@ -78,6 +82,7 @@ enum Engine: Equatable {
         case .appleLocal: return nil
         case .openRouter: return "OPENROUTER_API_KEY"
         case .elevenLabsScribe: return "ELEVEN_LABS_API_KEY"
+        case .geminiTranscribeLive: return "GEMINI_API_KEY"
         }
     }
 
@@ -90,7 +95,7 @@ enum Engine: Equatable {
     var privacyClass: PrivacyClass {
         switch self {
         case .appleLocal: return .onDevice
-        case .openRouter, .elevenLabsScribe: return .cloud
+        case .openRouter, .elevenLabsScribe, .geminiTranscribeLive: return .cloud
         }
     }
 
@@ -99,6 +104,7 @@ enum Engine: Equatable {
         case .appleLocal: return SpeechAnalyzerTranscriber(locale: locale)
         case .openRouter(let model): return OpenRouterTranscriber(model: model.rawValue)
         case .elevenLabsScribe: return ElevenLabsTranscriber()
+        case .geminiTranscribeLive: return GeminiLiveTranscriber()
         }
     }
 }

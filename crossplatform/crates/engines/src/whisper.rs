@@ -1,5 +1,5 @@
 use hearsay_core::engine::WhisperModel;
-use hearsay_core::session::{RawTranscript, TranscriptionFailure, Transcriber};
+use hearsay_core::session::{RawTranscript, TranscriptionFailure, TranscriptionHints, Transcriber};
 use std::path::Path;
 use std::sync::Mutex;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
@@ -23,11 +23,15 @@ impl WhisperTranscriber {
 }
 
 impl Transcriber for WhisperTranscriber {
-    fn transcribe(&self, samples_16k: &[f32]) -> Result<RawTranscript, TranscriptionFailure> {
+    fn transcribe(&self, samples_16k: &[f32], hints: &TranscriptionHints) -> Result<RawTranscript, TranscriptionFailure> {
+        let vocabulary = hints.vocabulary.join(", ");
         let _guard = self.lock.lock().map_err(|_| TranscriptionFailure::Failed("whisper lock poisoned".into()))?;
         let mut state = self.context.create_state().map_err(|e| TranscriptionFailure::Failed(format!("whisper state: {e}")))?;
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         params.set_language(Some(if self.model == WhisperModel::BaseEn { "en" } else { "auto" }));
+        if !vocabulary.is_empty() {
+            params.set_initial_prompt(&vocabulary);
+        }
         params.set_translate(false);
         params.set_print_progress(false);
         params.set_print_special(false);

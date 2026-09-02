@@ -50,15 +50,15 @@ impl OpenRouterModel {
 
     pub fn id(self) -> &'static str {
         match self {
-            OpenRouterModel::GeminiFlashLite => "google/gemini-2.5-flash-lite",
-            OpenRouterModel::GeminiFlash => "google/gemini-2.5-flash",
+            OpenRouterModel::GeminiFlashLite => "google/gemini-3.5-flash-lite",
+            OpenRouterModel::GeminiFlash => "google/gemini-3.7-flash",
         }
     }
 
     pub fn price_per_100k_words(self) -> &'static str {
         match self {
-            OpenRouterModel::GeminiFlashLite => "~$0.50 per 100k words",
-            OpenRouterModel::GeminiFlash => "~$1.85 per 100k words",
+            OpenRouterModel::GeminiFlashLite => "~$0.70 per 100k words",
+            OpenRouterModel::GeminiFlash => "~$1.45 per 100k words",
         }
     }
 }
@@ -71,14 +71,17 @@ pub enum Engine {
     Whisper(WhisperModel),
     OpenRouter(OpenRouterModel),
     ElevenLabsScribe,
+    GeminiTranscribeLive,
 }
 
 pub const ELEVENLABS_MODEL_ID: &str = "scribe_v2";
+pub const GEMINI_LIVE_MODEL_ID: &str = "gemini-3.5-transcribe-live";
 
 impl Engine {
     pub fn all() -> Vec<Engine> {
         let mut all: Vec<Engine> = WhisperModel::ALL.iter().map(|m| Engine::Whisper(*m)).collect();
         all.push(Engine::ElevenLabsScribe);
+        all.push(Engine::GeminiTranscribeLive);
         all.extend(OpenRouterModel::ALL.iter().map(|m| Engine::OpenRouter(*m)));
         all
     }
@@ -89,6 +92,7 @@ impl Engine {
             Engine::Whisper(m) => format!("whisper/{}", m.id()),
             Engine::OpenRouter(m) => m.id().to_string(),
             Engine::ElevenLabsScribe => format!("elevenlabs/{ELEVENLABS_MODEL_ID}"),
+            Engine::GeminiTranscribeLive => format!("google/{GEMINI_LIVE_MODEL_ID}"),
         }
     }
 
@@ -100,7 +104,8 @@ impl Engine {
         match self {
             Engine::Whisper(m) => format!("Whisper · {} (local, $0)", m.id()),
             Engine::OpenRouter(m) => format!("OpenRouter · {}", m.id()),
-            Engine::ElevenLabsScribe => "ElevenLabs · Scribe".to_string(),
+            Engine::ElevenLabsScribe => "ElevenLabs · Scribe v2".to_string(),
+            Engine::GeminiTranscribeLive => "Google · Gemini 3.5 Transcribe (live)".to_string(),
         }
     }
 
@@ -109,6 +114,7 @@ impl Engine {
             Engine::Whisper(m) => format!("whisper.cpp on this machine, works offline · {}", m.blurb()),
             Engine::OpenRouter(m) => format!("Google cloud via OpenRouter · {}", m.price_per_100k_words()),
             Engine::ElevenLabsScribe => "ElevenLabs Scribe v2 cloud, dedicated ASR, 90+ languages, mixes them mid-sentence · ~$2.45 per 100k words".to_string(),
+            Engine::GeminiTranscribeLive => "Google cloud, streaming ASR with live partials, 85+ languages, mixes them mid-sentence · ~$6 per 100k words, free tier in preview".to_string(),
         }
     }
 
@@ -117,6 +123,7 @@ impl Engine {
             Engine::Whisper(_) => None,
             Engine::OpenRouter(_) => Some("OPENROUTER_API_KEY"),
             Engine::ElevenLabsScribe => Some("ELEVEN_LABS_API_KEY"),
+            Engine::GeminiTranscribeLive => Some("GEMINI_API_KEY"),
         }
     }
 
@@ -130,7 +137,7 @@ impl Engine {
     pub fn privacy_class(&self) -> PrivacyClass {
         match self {
             Engine::Whisper(_) => PrivacyClass::OnDevice,
-            Engine::OpenRouter(_) | Engine::ElevenLabsScribe => PrivacyClass::Cloud,
+            Engine::OpenRouter(_) | Engine::ElevenLabsScribe | Engine::GeminiTranscribeLive => PrivacyClass::Cloud,
         }
     }
 

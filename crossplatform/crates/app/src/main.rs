@@ -10,7 +10,7 @@ fn main() {
     env_logger::init();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some("transcribe") => cli::transcribe(args.get(1).map(String::as_str)),
+        Some("transcribe") => cli::transcribe(args.get(1).map(String::as_str), args.get(2).map(String::as_str)),
         Some("engines") => cli::engines(),
         _ => {
             let options = eframe::NativeOptions {

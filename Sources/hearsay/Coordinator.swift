@@ -284,7 +284,7 @@ final class Coordinator {
         switch resolved {
         case .appleLocal:
             reloadAppleModel()
-        case .openRouter, .elevenLabsScribe:
+        case .openRouter, .elevenLabsScribe, .geminiTranscribeLive:
             loadModelTask?.cancel()
             engine = .ready
         }
@@ -372,7 +372,9 @@ final class Coordinator {
         }
 
         let token = UUID()
-        let events = transcriber.transcribe(audio)
+        // dictionary → transcription and style → transcription, in one object every engine receives.
+        let hints = TranscriptionHints(vocabulary: rules.lexicon.terms, mode: rules.polish == .off ? .verbatim : .smart)
+        let events = transcriber.transcribe(audio, hints: hints)
         let transcription = Task { [weak self] () throws -> RawTranscript in
             var final: RawTranscript?
             for try await event in events {

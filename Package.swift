@@ -15,6 +15,7 @@ let package = Package(
         .target(name: "Bakeoff"),
         .target(name: "Lexicon"),
         .executableTarget(name: "bakeoff-tests", dependencies: ["Bakeoff"]),
+        .executableTarget(name: "hearsay-check", dependencies: ["Transcription"]),
         .executableTarget(
             name: "hearsay",
             dependencies: ["Utterance", "Audio", "Transcription", "Polish", "Insertion", "History", "Overlay", "Bakeoff", "Lexicon"]

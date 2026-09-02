@@ -68,3 +68,46 @@ crossplatform/
 4. App crate: overlay + panes; full macOS loop
 5. Linux container build/test; Windows check
 6. README section + release notes; both apps share the data-file formats
+
+## Addendum 2026-09-02 — Gemini 3.5 Transcribe Live, OpenRouter 3.x (both apps)
+
+**Concept change.** *transcription* gets a second shape. A batch engine takes the whole utterance at
+release; a **live** engine takes audio while the key is held and returns partials, so the wait at
+release is only the tail of the stream. Same purpose, same principle (one utterance in, one final
+out), different mechanism.
+
+**State of a live take** (MIRO-checked):
+
+| state | meaning |
+|---|---|
+| `Streaming { committed: [segment], interim }` | key held; server commits segments at pauses, `interim` is its current guess |
+| `Draining` | key released, `audioStreamEnd` sent, waiting for the last commit |
+| `Done(RawTranscript)` / `Failed(reason)` | final text = committed segments joined; interim never lands unless committed |
+
+Partial shown in the pill = committed + interim. Draining ends on the first of: server `turnComplete`,
+socket close, 300 ms of quiet after a post-end commit, 6 s hard cap (interim salvaged if nothing was
+committed).
+
+**Syncs** (coordinator only):
+
+- dictionary → transcription: lexicon terms become `customVocabulary` (≤ 1000).
+- style → transcription: mode `SMART` iff polish ≠ Off — the model's own filler removal and number
+  formatting, zero extra latency. The polisher still runs as configured; the guard is unchanged.
+  Off = `VERBATIM`: what was said.
+- language: always auto (empty `languageCodes`). Mid-sentence mixing is the reason this engine exists.
+- Every engine now receives the same `TranscriptionHints { vocabulary, mode }`; batch engines ignore
+  what they cannot use. One door for the dictionary → transcription sync, not a per-engine setter.
+
+**Mechanism.** `wss://…/BidiGenerateContent?key=…`; `setup { model, inputAudioTranscription }`;
+`realtimeInput.audio` (pcm16 mono 16 kHz, ~100 ms chunks) then `realtimeInput.audioStreamEnd`;
+`serverContent.interimInputTranscription` / `inputTranscription`. macOS: `URLSessionWebSocketTask`
+behind the existing `Transcriber` protocol. Rust: `tungstenite` on a session thread (30 ms read
+timeout so chunk sends and reads interleave), `LiveTranscriber` / `LiveTranscription` traits in core,
+`EngineHandle = Batch | Live` in the app, `Recording::take_new()` drains fresh 16 kHz samples each frame.
+
+Key `GEMINI_API_KEY`. Price ≈ $6 per 100k words ($0.005/min audio in + $0.004/min text out); free
+tier while in preview. Wire key `google/gemini-3.5-transcribe-live`.
+
+**OpenRouter.** 2.5 → `google/gemini-3.5-flash-lite` (~$0.70 / 100k words) and `google/gemini-3.7-flash`
+(~$1.45); the Rust polisher default follows to 3.5-flash-lite. Old wire keys stop parsing: settings
+fall back to the default engine, archived bake-off rows keep their strings.

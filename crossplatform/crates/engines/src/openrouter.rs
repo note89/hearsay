@@ -1,5 +1,5 @@
 use hearsay_core::polish::{self, PolishContext, PolishGuard, PolishIntensity, PolishRejection, PolishVerdict, Polisher, WritingStyle};
-use hearsay_core::session::{RawTranscript, TranscriptionFailure, Transcriber};
+use hearsay_core::session::{RawTranscript, TranscriptionFailure, TranscriptionHints, Transcriber};
 use serde_json::{json, Value};
 
 const CHAT_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
@@ -32,15 +32,15 @@ impl OpenRouterTranscriber {
 }
 
 impl Transcriber for OpenRouterTranscriber {
-    fn transcribe(&self, samples_16k: &[f32]) -> Result<RawTranscript, TranscriptionFailure> {
+    fn transcribe(&self, samples_16k: &[f32], hints: &TranscriptionHints) -> Result<RawTranscript, TranscriptionFailure> {
         let wav = super::wav_from_samples(samples_16k);
         let body = json!({
             "model": self.model,
             "messages": [{
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Transcribe this audio verbatim, in its original language. Output only the transcript text — no quotes, no commentary."},
-                    {"type": "input_audio", "input_audio": {"data": base64(&wav), "format": "wav"}}
+                    {"type": "text", "text": transcription_prompt(hints)},
+                    {"type": "input_audio", "input_audio": {"data": crate::base64::encode(&wav), "format": "wav"}}
                 ]
             }]
         });
@@ -80,16 +80,13 @@ impl Polisher for OpenRouterPolisher {
     }
 }
 
-fn base64(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
-    for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        out.push(TABLE[(n >> 18) as usize & 63] as char);
-        out.push(TABLE[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { TABLE[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { TABLE[n as usize & 63] as char } else { '=' });
+/// Verbatim always: the polish concept owns cleanup. Dictionary terms ride along as spelling hints.
+fn transcription_prompt(hints: &TranscriptionHints) -> String {
+    let mut prompt = String::from("Transcribe this audio verbatim, in its original language (it may mix languages mid-sentence; keep the mix). Output only the transcript text — no quotes, no commentary.");
+    if !hints.vocabulary.is_empty() {
+        prompt.push_str(" Spell these terms exactly when you hear them: ");
+        prompt.push_str(&hints.vocabulary.join(", "));
+        prompt.push('.');
     }
-    out
+    prompt
 }

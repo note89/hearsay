@@ -57,7 +57,12 @@ impl Recording {
         self.accumulator.lock().map(|a| a.seconds()).unwrap_or(0.0)
     }
 
-    /// Ends capture and returns mono 16 kHz samples.
+    /// Mono 16 kHz samples that arrived since the last call — the feed for a live engine.
+    pub fn take_new(&self) -> Vec<f32> {
+        self.accumulator.lock().map(|mut a| a.take_new()).unwrap_or_default()
+    }
+
+    /// Ends capture and returns every mono 16 kHz sample of the take.
     pub fn stop(self) -> Vec<f32> {
         drop(self._stream);
         self.accumulator.lock().map(|a| a.mono_16k()).unwrap_or_default()

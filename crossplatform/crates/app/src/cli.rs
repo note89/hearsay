@@ -10,10 +10,20 @@ pub fn engines() {
     }
 }
 
-pub fn transcribe(path: Option<&str>) {
+pub fn transcribe(path: Option<&str>, engine_key: Option<&str>) {
     let Some(path) = path else {
-        eprintln!("usage: hearsay-rs transcribe <file.wav>");
+        eprintln!("usage: hearsay-rs transcribe <file.wav> [engine wire key, see `hearsay-rs engines`]");
         std::process::exit(2);
+    };
+    let engine = match engine_key {
+        None => Engine::default_engine(),
+        Some(key) => match Engine::parse(key) {
+            Some(engine) => engine,
+            None => {
+                eprintln!("unknown engine {key}; see `hearsay-rs engines`");
+                std::process::exit(2);
+            }
+        },
     };
     let samples = match read_wav_16k(path) {
         Ok(s) => s,
@@ -24,9 +34,8 @@ pub fn transcribe(path: Option<&str>) {
     };
     let dir = support_dir();
     let keys = KeyStore::new(&dir);
-    let engine = Engine::default_engine();
     let started = Instant::now();
-    let transcriber = match hearsay_engines::make_transcriber(engine, &keys, &dir.join("models")) {
+    let transcriber = match hearsay_engines::make_engine(engine, &keys, &dir.join("models")) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("{}: {e}", engine.wire_key());
@@ -35,13 +44,17 @@ pub fn transcribe(path: Option<&str>) {
     };
     let load_ms = started.elapsed().as_millis();
     let started = Instant::now();
-    match transcriber.transcribe(&samples) {
+    match transcriber.transcribe(&samples, &hearsay_core::session::TranscriptionHints::default()) {
+        Ok(text) if text.text().is_empty() => {
+            eprintln!("nothing transcribed");
+            std::process::exit(1);
+        }
         Ok(text) => {
             println!("{}", text.text());
             eprintln!("[{} · {:.1}s audio · load {load_ms} ms · transcribe {} ms]", engine.wire_key(), samples.len() as f64 / 16_000.0, started.elapsed().as_millis());
         }
         Err(e) => {
-            eprintln!("transcription failed: {e}");
+            eprintln!("{e}");
             std::process::exit(1);
         }
     }

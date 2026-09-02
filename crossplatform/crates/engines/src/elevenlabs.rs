@@ -1,5 +1,5 @@
 use hearsay_core::engine::ELEVENLABS_MODEL_ID;
-use hearsay_core::session::{RawTranscript, TranscriptionFailure, Transcriber};
+use hearsay_core::session::{RawTranscript, TranscriptionFailure, TranscriptionHints, Transcriber};
 use serde_json::Value;
 
 /// ElevenLabs Scribe — dedicated cloud ASR, detects the language itself.
@@ -14,7 +14,7 @@ impl ScribeTranscriber {
 }
 
 impl Transcriber for ScribeTranscriber {
-    fn transcribe(&self, samples_16k: &[f32]) -> Result<RawTranscript, TranscriptionFailure> {
+    fn transcribe(&self, samples_16k: &[f32], _hints: &TranscriptionHints) -> Result<RawTranscript, TranscriptionFailure> {
         let wav = super::wav_from_samples(samples_16k);
         let form = reqwest::blocking::multipart::Form::new()
             .text("model_id", ELEVENLABS_MODEL_ID)

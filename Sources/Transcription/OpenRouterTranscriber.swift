@@ -8,7 +8,7 @@ public enum OpenRouterFailure: Error {
 /// Cloud engine for comparison runs: ships the whole utterance as WAV to an audio-capable LLM via OpenRouter.
 /// No partials — one shot at end of input.
 public final class OpenRouterTranscriber: Transcriber {
-    public static let defaultModel = "google/gemini-2.5-flash-lite"
+    public static let defaultModel = "google/gemini-3.5-flash-lite"
 
     public static var keyAvailable: Bool { KeyStore.value("OPENROUTER_API_KEY") != nil }
 
@@ -22,7 +22,7 @@ public final class OpenRouterTranscriber: Transcriber {
         self.model = model
     }
 
-    public func transcribe(_ audio: AsyncStream<AVAudioPCMBuffer>) -> AsyncThrowingStream<TranscriptionEvent, Error> {
+    public func transcribe(_ audio: AsyncStream<AVAudioPCMBuffer>, hints: TranscriptionHints) -> AsyncThrowingStream<TranscriptionEvent, Error> {
         let (model, key) = (model, key)
         return oneShotWavTranscription(audio) { wav in try await Self.request(wav: wav, model: model, key: key) }
     }

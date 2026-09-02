@@ -64,7 +64,7 @@ pub fn dictation(app: &mut App, ui: &mut egui::Ui) {
     }
     ui.add_space(12.0);
     ui.label(egui::RichText::new("API KEYS").small().strong());
-    ui.label(egui::RichText::new(format!("Cloud engines read OPENROUTER_API_KEY / ELEVEN_LABS_API_KEY from the environment or from {keys_file}")).small().weak());
+    ui.label(egui::RichText::new(format!("Cloud engines read OPENROUTER_API_KEY / ELEVEN_LABS_API_KEY / GEMINI_API_KEY from the environment or from {keys_file}")).small().weak());
     if ui.button("Create keys file").clicked() {
         app.keys.ensure_file();
     }

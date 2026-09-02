@@ -3,7 +3,7 @@ name = "hearsay-engines"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Transcriber and Polisher implementations: whisper.cpp (local), OpenRouter, ElevenLabs"
+description = "Transcriber and Polisher implementations: whisper.cpp (local), Gemini Live, OpenRouter, ElevenLabs"
 
 [features]
 default = ["local-stt"]
@@ -20,6 +20,8 @@ whisper-rs = { version = "0.14", optional = true }
 # TLS: rustls on Unix (no OpenSSL headers needed); the system store (schannel) on Windows.
 [target.'cfg(not(windows))'.dependencies]
 reqwest = { workspace = true, features = ["rustls-tls"] }
+tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 
 [target.'cfg(windows)'.dependencies]
 reqwest = { workspace = true, features = ["native-tls"] }
+tungstenite = { version = "0.26", features = ["native-tls"] }

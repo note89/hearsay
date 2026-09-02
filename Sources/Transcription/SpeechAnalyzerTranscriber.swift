@@ -52,7 +52,7 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
         }
     }
 
-    public func transcribe(_ audio: AsyncStream<AVAudioPCMBuffer>) -> AsyncThrowingStream<TranscriptionEvent, Error> {
+    public func transcribe(_ audio: AsyncStream<AVAudioPCMBuffer>, hints: TranscriptionHints) -> AsyncThrowingStream<TranscriptionEvent, Error> {
         let locale = self.locale
         return AsyncThrowingStream { continuation in
             let task = Task.detached {

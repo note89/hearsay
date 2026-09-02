@@ -8,13 +8,15 @@ use hearsay_backends::audio::Recording;
 use hearsay_backends::hotkey::{GestureEvent, HoldGestureMonitor};
 use hearsay_backends::insert::PasteInserter;
 use hearsay_core::bakeoff::{BakeoffRecord, BakeoffStore, RivalOutcome, SCRIPT};
+use hearsay_core::session::{LiveTranscription, PolishMode, TranscriptMode, TranscriptionHints};
+use hearsay_engines::EngineHandle;
 use hearsay_core::engine::{Engine, PrivacyClass};
 use hearsay_core::history::{DictationRecord, HistoryStore, RecordedOutcome};
 use hearsay_core::keystore::KeyStore;
 use hearsay_core::lexicon::Lexicon;
 use hearsay_core::paths::support_dir;
 use hearsay_core::polish::{PolishContext, PolishRejection, Polisher, WritingStyle};
-use hearsay_core::session::{deliver, InsertableText, InsertionBlock, InsertionEvidence, InsertionOutcome, Inserter, RawTranscript, SessionPlan, SessionRules, Transcriber};
+use hearsay_core::session::{deliver, InsertableText, InsertionBlock, InsertionEvidence, InsertionOutcome, Inserter, RawTranscript, SessionPlan, SessionRules};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -63,6 +65,19 @@ impl FinishingStep {
 pub struct Session {
     rules: SessionRules,
     plan: SessionPlan,
+    hints: TranscriptionHints,
+}
+
+/// The take in the shape its engine finishes it: all the audio for a batch engine, the open session for a live one.
+enum Take {
+    Batch { samples: Vec<f32>, handle: EngineHandle },
+    Live(Box<dyn LiveTranscription>),
+}
+
+/// Where the audio goes while the key is held: nowhere yet (batch), or up the wire (live).
+pub enum Feed {
+    Batch,
+    Live(Box<dyn LiveTranscription>),
 }
 
 /// What a finished take produced, for the overlay and history.
@@ -76,7 +91,7 @@ pub enum SessionOutcome {
 
 pub enum Phase {
     Idle,
-    Listening(Session, Recording),
+    Listening(Session, Recording, Feed),
     Finishing(Session, FinishingStep),
     Settled(SessionOutcome, Instant),
 }
@@ -87,7 +102,7 @@ enum WorkerMessage {
     Delivered { text: InsertableText, ms: u64, rejection: Option<PolishRejection> },
     NothingHeard,
     Failed(String),
-    ModelReady(Result<Arc<dyn Transcriber>, String>),
+    ModelReady(Result<EngineHandle, String>),
     Downloaded(Result<(), String>),
 }
 
@@ -127,12 +142,13 @@ pub struct App {
     pub bakeoff_pane_visible: bool,
     hotkey: Option<HoldGestureMonitor>,
     inserter: Arc<PasteInserter>,
-    transcriber: Option<Arc<dyn Transcriber>>,
+    engine_handle: Option<EngineHandle>,
     polisher: Option<Arc<dyn Polisher>>,
     pending_take: Option<PendingTake>,
     worker_tx: Sender<WorkerMessage>,
     worker_rx: Receiver<WorkerMessage>,
     overlay_level: f32,
+    overlay_partial: String,
 }
 
 const SETTLE_DISPLAY: Duration = Duration::from_millis(1400);
@@ -169,11 +185,12 @@ impl App {
             bakeoff_pane_visible: false,
             hotkey,
             inserter: Arc::new(PasteInserter::new()),
-            transcriber: None,
+            engine_handle: None,
             pending_take: None,
             worker_tx,
             worker_rx,
             overlay_level: 0.0,
+            overlay_partial: String::new(),
             settings,
         };
         hearsay_core::lexicon::ensure_file(&app.dictionary_path);
@@ -183,7 +200,7 @@ impl App {
 
     /// Resolves the chosen engine to the one sessions run on and loads it on a thread.
     pub fn activate_engine(&mut self) {
-        self.transcriber = None;
+        self.engine_handle = None;
         self.engine_status = EngineStatus::Loading;
         let engine = self.settings.engine;
         if let Engine::Whisper(model) = engine {
@@ -196,7 +213,7 @@ impl App {
         let models_dir = self.models_dir.clone();
         let tx = self.worker_tx.clone();
         std::thread::spawn(move || {
-            let result = hearsay_engines::make_transcriber(engine, &keys, &models_dir).map(Arc::from).map_err(|e| e.to_string());
+            let result = hearsay_engines::make_engine(engine, &keys, &models_dir).map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::ModelReady(result));
         });
         self.polisher = self.keys.value("OPENROUTER_API_KEY").map(|key| Arc::new(hearsay_engines::openrouter::OpenRouterPolisher::new(key)) as Arc<dyn Polisher>);
@@ -268,40 +285,64 @@ impl App {
         } else {
             SessionPlan::Dictate
         };
+        let Some(handle) = self.engine_handle.clone() else {
+            self.settle(SessionOutcome::Failed { reason: "engine not ready".into(), salvaged: false });
+            return;
+        };
+        // dictionary → transcription and style → transcription, in one object every engine receives.
+        let hints = TranscriptionHints {
+            vocabulary: rules.lexicon.terms.clone(),
+            mode: match rules.polish { PolishMode::Off => TranscriptMode::Verbatim, PolishMode::Light | PolishMode::Full => TranscriptMode::Smart },
+        };
         match Recording::start() {
             Ok(recording) => {
-                self.phase = Phase::Listening(Session { rules, plan }, recording);
+                let feed = match handle {
+                    EngineHandle::Batch(_) => Feed::Batch,
+                    EngineHandle::Live(live) => Feed::Live(live.start(&hints)),
+                };
+                self.overlay_partial.clear();
+                self.phase = Phase::Listening(Session { rules, plan, hints }, recording, feed);
             }
             Err(e) => self.settle(SessionOutcome::Failed { reason: format!("microphone: {e}"), salvaged: false }),
         }
     }
 
     fn released(&mut self) {
-        let Phase::Listening(session, recording) = std::mem::replace(&mut self.phase, Phase::Idle) else { return };
-        let samples = recording.stop();
+        let Phase::Listening(session, recording, feed) = std::mem::replace(&mut self.phase, Phase::Idle) else { return };
         if let SessionPlan::Bakeoff { expected, run_id } = &session.plan {
             self.pending_take = Some(PendingTake { baseline: self.bakeoff_text.clone(), since: Instant::now(), expected: expected.clone(), run_id: run_id.clone(), ours: None, rival: None });
         }
-        let Some(transcriber) = self.transcriber.clone() else {
+        let Some(handle) = self.engine_handle.clone() else {
             self.settle(SessionOutcome::Failed { reason: "engine not ready".into(), salvaged: false });
             return;
         };
         let polisher = self.polisher.clone();
         let rules = session.rules.clone();
+        let hints = session.hints.clone();
         let tx = self.worker_tx.clone();
+        let heard_seconds = recording.seconds();
+        let take: Take = match feed {
+            Feed::Batch => Take::Batch { samples: recording.stop(), handle },
+            Feed::Live(mut live) => {
+                live.feed(&recording.take_new());
+                drop(recording);
+                Take::Live(live)
+            }
+        };
         std::thread::spawn(move || {
-            if samples.len() < 1600 {
+            if heard_seconds < 0.1 {
                 let _ = tx.send(WorkerMessage::NothingHeard);
                 return;
             }
             let started = Instant::now();
-            let raw: RawTranscript = match transcriber.transcribe(&samples) {
-                Ok(raw) => raw,
-                Err(e) => {
-                    let _ = tx.send(WorkerMessage::Failed(e.to_string()));
-                    return;
-                }
-            };
+            let raw: RawTranscript = match take {
+                Take::Batch { samples, handle } => handle.transcribe(&samples, &hints),
+                Take::Live(live) => live.finish(),
+            }
+            .unwrap_or_else(|e| {
+                let _ = tx.send(WorkerMessage::Failed(e.to_string()));
+                RawTranscript::from_engine(String::new())
+            });
             if raw.text().is_empty() {
                 let _ = tx.send(WorkerMessage::NothingHeard);
                 return;
@@ -322,7 +363,7 @@ impl App {
             match message {
                 WorkerMessage::ModelReady(Ok(t)) => {
                     log::info!("activate_engine: {} ready", self.active_engine().label());
-                    self.transcriber = Some(t);
+                    self.engine_handle = Some(t);
                     self.engine_status = EngineStatus::Ready;
                 }
                 WorkerMessage::ModelReady(Err(e)) => {
@@ -471,8 +512,12 @@ impl eframe::App for App {
         self.drain_worker();
         self.watch_rival();
         self.expire_settled();
-        if let Phase::Listening(_, recording) = &self.phase {
+        if let Phase::Listening(_, recording, feed) = &mut self.phase {
             self.overlay_level = recording.level();
+            if let Feed::Live(live) = feed {
+                live.feed(&recording.take_new());
+                self.overlay_partial = live.partial();
+            }
         }
 
         egui::SidePanel::left("nav").exact_width(170.0).show(ctx, |ui| {
@@ -521,6 +566,7 @@ impl App {
         let cloud = matches!(self.active_engine().privacy_class(), PrivacyClass::Cloud);
         let level = self.overlay_level;
         let content: (String, egui::Color32) = match &self.phase {
+            Phase::Listening(..) if !self.overlay_partial.is_empty() => (tail(&self.overlay_partial, 48), egui::Color32::from_white_alpha(220)),
             Phase::Listening(..) => ("listening…".into(), egui::Color32::from_white_alpha(150)),
             Phase::Finishing(_, step) => (format!("{}…", step.label()), egui::Color32::from_white_alpha(200)),
             Phase::Settled(outcome, _) => match outcome {
@@ -566,5 +612,15 @@ impl App {
                 });
             },
         );
+    }
+}
+
+/// The last `max` characters, for the pill.
+fn tail(text: &str, max: usize) -> String {
+    let count = text.chars().count();
+    if count <= max {
+        text.to_string()
+    } else {
+        format!("…{}", text.chars().skip(count - max).collect::<String>())
     }
 }

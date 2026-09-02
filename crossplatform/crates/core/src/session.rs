@@ -29,9 +29,45 @@ pub enum TranscriptionFailure {
     Failed(String),
 }
 
+/// What the dictation should read like: what was said, or what was meant to be written.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TranscriptMode {
+    Verbatim,
+    Smart,
+}
+
+/// What every engine is told before it hears the utterance. Engines ignore what they cannot use.
+#[derive(Clone, Debug)]
+pub struct TranscriptionHints {
+    pub vocabulary: Vec<String>,
+    pub mode: TranscriptMode,
+}
+
+impl Default for TranscriptionHints {
+    fn default() -> Self {
+        TranscriptionHints { vocabulary: Vec::new(), mode: TranscriptMode::Verbatim }
+    }
+}
+
+/// A batch engine: the whole utterance at release.
 pub trait Transcriber: Send + Sync {
     /// Mono 16 kHz samples in, the words said out. Blocking; the app runs it off the UI thread.
-    fn transcribe(&self, samples_16k: &[f32]) -> Result<RawTranscript, TranscriptionFailure>;
+    fn transcribe(&self, samples_16k: &[f32], hints: &TranscriptionHints) -> Result<RawTranscript, TranscriptionFailure>;
+}
+
+/// A streaming engine: audio in while the key is held, partials on the way, one final at the end.
+pub trait LiveTranscriber: Send + Sync {
+    /// Non-blocking: connection and streaming happen on the session's own thread.
+    fn start(&self, hints: &TranscriptionHints) -> Box<dyn LiveTranscription>;
+}
+
+pub trait LiveTranscription: Send {
+    /// Mono 16 kHz samples as they arrive. Non-blocking.
+    fn feed(&mut self, samples_16k: &[f32]);
+    /// Committed text plus the current interim guess, for the pill.
+    fn partial(&self) -> String;
+    /// Ends the audio and waits (bounded) for the final. Blocking; run it off the UI thread.
+    fn finish(self: Box<Self>) -> Result<RawTranscript, TranscriptionFailure>;
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

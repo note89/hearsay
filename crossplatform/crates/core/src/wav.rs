@@ -1,45 +1,65 @@
-/// Collects microphone samples at any rate and hands out 16 kHz mono: `f32` for local engines,
-/// 16-bit WAV bytes for cloud engines.
+/// Collects microphone samples at any rate and keeps them as 16 kHz mono, resampled as they arrive:
+/// `f32` for local engines, `take_new` for streaming engines, 16-bit WAV bytes for cloud engines.
 pub struct Accumulator {
-    samples: Vec<f32>,
+    mono_16k: Vec<f32>,
     input_rate: u32,
     channels: u16,
+    frames_seen: u64,
+    /// Position, in input frames, of the next output sample.
+    next_out_pos: f64,
+    last_frame: f32,
+    drained: usize,
 }
 
 pub const TARGET_RATE: u32 = 16_000;
 
 impl Accumulator {
     pub fn new(input_rate: u32, channels: u16) -> Self {
-        Self { samples: Vec::new(), input_rate, channels: channels.max(1) }
+        Self { mono_16k: Vec::new(), input_rate, channels: channels.max(1), frames_seen: 0, next_out_pos: 0.0, last_frame: 0.0, drained: 0 }
     }
 
-    /// Interleaved frames as delivered by the capture backend.
+    /// Interleaved frames as delivered by the capture backend. Downmixed, then linearly resampled
+    /// across chunk boundaries (fine for speech at 44.1/48 kHz inputs).
     pub fn append(&mut self, interleaved: &[f32]) {
         let channels = self.channels as usize;
-        self.samples.extend(interleaved.chunks(channels).map(|frame| frame.iter().sum::<f32>() / channels as f32));
+        let frames: Vec<f32> = interleaved.chunks(channels).map(|frame| frame.iter().sum::<f32>() / channels as f32).collect();
+        if frames.is_empty() {
+            return;
+        }
+        if self.input_rate == TARGET_RATE {
+            self.mono_16k.extend_from_slice(&frames);
+        } else {
+            let ratio = self.input_rate as f64 / TARGET_RATE as f64;
+            let base = self.frames_seen as f64;
+            let end = base + frames.len() as f64;
+            while self.next_out_pos < end - 1.0 {
+                let index = self.next_out_pos.floor();
+                let frac = (self.next_out_pos - index) as f32;
+                let i = (index - base) as i64;
+                let a = if i < 0 { self.last_frame } else { frames[i as usize] };
+                let b = frames[(i + 1) as usize];
+                self.mono_16k.push(a + (b - a) * frac);
+                self.next_out_pos += ratio;
+            }
+        }
+        self.last_frame = *frames.last().expect("non-empty");
+        self.frames_seen += frames.len() as u64;
     }
 
     pub fn seconds(&self) -> f64 {
-        self.samples.len() as f64 / self.input_rate as f64
+        self.frames_seen as f64 / self.input_rate as f64
     }
 
-    /// Mono 16 kHz, linear resampling (fine for speech at 44.1/48 kHz inputs).
+    /// Everything so far, mono 16 kHz.
     pub fn mono_16k(&self) -> Vec<f32> {
-        if self.input_rate == TARGET_RATE {
-            return self.samples.clone();
-        }
-        let ratio = self.input_rate as f64 / TARGET_RATE as f64;
-        let out_len = (self.samples.len() as f64 / ratio) as usize;
-        (0..out_len)
-            .map(|i| {
-                let pos = i as f64 * ratio;
-                let index = pos as usize;
-                let frac = (pos - index as f64) as f32;
-                let a = self.samples.get(index).copied().unwrap_or(0.0);
-                let b = self.samples.get(index + 1).copied().unwrap_or(a);
-                a + (b - a) * frac
-            })
-            .collect()
+        self.mono_16k.clone()
+    }
+
+    /// Only what arrived since the last call — the feed for a streaming engine.
+    pub fn take_new(&mut self) -> Vec<f32> {
+        let fresh = self.mono_16k[self.drained..].to_vec();
+        self.drained = self.mono_16k.len();
+        fresh
     }
 
     pub fn wav_data(&self) -> Vec<u8> {
