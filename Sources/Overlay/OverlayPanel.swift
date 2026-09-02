@@ -45,6 +45,7 @@ public final class OverlayPanel {
     static let size = NSSize(width: 400, height: 64)
     private static let bottomMargin: CGFloat = 28
     private static let raisedMargin: CGFloat = 150
+    private static let fadeOut: TimeInterval = 0.22
 
     private let panel: NSPanel
     private let model = OverlayModel()
@@ -74,7 +75,7 @@ public final class OverlayPanel {
         switch state {
         case .hidden:
             model.resetLevels()
-            panel.orderOut(nil)
+            fadeOut()
         case .listening, .working, .settled:
             show()
         }
@@ -94,7 +95,26 @@ public final class OverlayPanel {
 
     private func show() {
         panel.setFrameOrigin(Self.origin(on: Self.screenUnderMouse(), placement: placement))
+        // Replaces any running fade: the animator's target becomes fully visible, now.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            panel.animator().alphaValue = 1
+        }
         if !panel.isVisible { panel.orderFrontRegardless() }
+    }
+
+    private func fadeOut() {
+        let panel = panel
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = Self.fadeOut
+            panel.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.model.state == .hidden else { return }
+                panel.orderOut(nil)
+                panel.alphaValue = 1
+            }
+        })
     }
 
     private static func screenUnderMouse() -> NSScreen? {

@@ -183,7 +183,8 @@ final class Coordinator {
     let bakeoff: BakeoffStore
     @ObservationIgnored private var dictionaryURL: URL!
 
-    private static let settleDisplay: Duration = .milliseconds(1400)
+    private static let settleDisplay: Duration = .milliseconds(700)
+    private static let warningDisplay: Duration = .milliseconds(2200)
     private static let bakeoffDisplay: Duration = .seconds(4)
     private static let transcriptionTimeout: Duration = .seconds(15)
     private static let polishTimeout: Duration = .seconds(8)
@@ -510,10 +511,10 @@ final class Coordinator {
 
     private func settle(_ outcome: SessionOutcome) {
         phase = .settled(outcome)
-        overlay.render(Self.overlayState(for: outcome))
+        let state = Self.overlayState(for: outcome)
+        overlay.render(state)
         if settings.historyEnabled, let entry = Self.historyEntry(for: outcome) { history.record(entry) }
-        let display: Duration
-        if case .compared = outcome { display = Self.bakeoffDisplay } else { display = Self.settleDisplay }
+        let display = Self.display(for: outcome, shownAs: state)
         settleTask = Task { [weak self] in
             try? await Task.sleep(for: display)
             guard !Task.isCancelled, let self, case .settled = self.phase else { return }
@@ -523,6 +524,13 @@ final class Coordinator {
     }
 
     // MARK: - Projections (content-free where logged)
+
+    /// How long the settled pill stays: good news is a glance, a warning must be readable, a bake-off verdict has two numbers.
+    private static func display(for outcome: SessionOutcome, shownAs state: OverlayState) -> Duration {
+        if case .compared = outcome { return bakeoffDisplay }
+        if case .settled(_, .warn) = state { return warningDisplay }
+        return settleDisplay
+    }
 
     private static func overlayState(for outcome: SessionOutcome) -> OverlayState {
         switch outcome {

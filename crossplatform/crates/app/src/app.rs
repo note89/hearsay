@@ -151,7 +151,11 @@ pub struct App {
     overlay_partial: String,
 }
 
-const SETTLE_DISPLAY: Duration = Duration::from_millis(1400);
+const SETTLE_DISPLAY: Duration = Duration::from_millis(700);
+/// A warning must be readable.
+const WARNING_DISPLAY: Duration = Duration::from_millis(2200);
+/// The last stretch of the settled pill fades instead of cutting.
+const SETTLE_FADE: Duration = Duration::from_millis(250);
 const BAKEOFF_DISPLAY: Duration = Duration::from_secs(4);
 const RIVAL_TIMEOUT: Duration = Duration::from_secs(8);
 const RIVAL_GRACE: Duration = Duration::from_millis(400);
@@ -471,8 +475,7 @@ impl App {
 
     fn expire_settled(&mut self) {
         if let Phase::Settled(outcome, since) = &self.phase {
-            let display = if matches!(outcome, SessionOutcome::Compared { .. }) { BAKEOFF_DISPLAY } else { SETTLE_DISPLAY };
-            if since.elapsed() > display {
+            if since.elapsed() > display_for(outcome) {
                 self.phase = Phase::Idle;
             }
         }
@@ -581,6 +584,17 @@ impl App {
             Phase::Idle => unreachable!(),
         };
         let listening = matches!(self.phase, Phase::Listening(..));
+        let (quiet, fade) = match &self.phase {
+            Phase::Settled(outcome, since) => {
+                let remaining = display_for(outcome).saturating_sub(since.elapsed());
+                let fade = (remaining.as_secs_f32() / SETTLE_FADE.as_secs_f32()).clamp(0.0, 1.0);
+                (matches!(outcome, SessionOutcome::Landed { outcome: InsertionOutcome::Inserted { .. }, .. }), fade)
+            }
+            _ => (false, 1.0),
+        };
+        let alpha = |base: u8| (base as f32 * fade) as u8;
+        let pill_alpha = alpha(if quiet { 150 } else { 220 });
+        let text_color = egui::Color32::from_rgba_unmultiplied(content.1.r(), content.1.g(), content.1.b(), alpha(content.1.a()));
         ctx.show_viewport_immediate(
             egui::ViewportId::from_hash_of("hearsay-overlay"),
             egui::ViewportBuilder::default()
@@ -594,8 +608,8 @@ impl App {
             move |ctx, _| {
                 egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
                     let rect = ui.max_rect().shrink2(egui::vec2(10.0, 9.0));
-                    ui.painter().rect_filled(rect, 23.0, egui::Color32::from_black_alpha(220));
-                    ui.painter().rect_stroke(rect, 23.0, egui::Stroke::new(1.0_f32, egui::Color32::from_white_alpha(36)), egui::StrokeKind::Inside);
+                    ui.painter().rect_filled(rect, 23.0, egui::Color32::from_black_alpha(pill_alpha));
+                    ui.painter().rect_stroke(rect, 23.0, egui::Stroke::new(1.0_f32, egui::Color32::from_white_alpha(alpha(36))), egui::StrokeKind::Inside);
                     let mut x = rect.left() + 20.0;
                     if cloud {
                         ui.painter().text(egui::pos2(x, rect.center().y), egui::Align2::LEFT_CENTER, "cloud", egui::FontId::proportional(10.0), egui::Color32::from_rgb(255, 166, 87));
@@ -608,10 +622,20 @@ impl App {
                         }
                         x += 24.0 * 5.0 + 10.0;
                     }
-                    ui.painter().text(egui::pos2(x, rect.center().y), egui::Align2::LEFT_CENTER, &content.0, egui::FontId::proportional(13.0), content.1);
+                    ui.painter().text(egui::pos2(x, rect.center().y), egui::Align2::LEFT_CENTER, &content.0, egui::FontId::proportional(13.0), text_color);
                 });
             },
         );
+    }
+}
+
+/// How long the settled pill stays: good news is a glance, a warning must be readable, a bake-off
+/// verdict has two numbers.
+fn display_for(outcome: &SessionOutcome) -> Duration {
+    match outcome {
+        SessionOutcome::Compared { .. } => BAKEOFF_DISPLAY,
+        SessionOutcome::Landed { outcome: InsertionOutcome::Inserted { .. }, .. } => SETTLE_DISPLAY,
+        SessionOutcome::Landed { outcome: InsertionOutcome::CopiedToClipboard(_), .. } | SessionOutcome::NothingHeard | SessionOutcome::Failed { .. } => WARNING_DISPLAY,
     }
 }
 

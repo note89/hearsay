@@ -5,6 +5,12 @@ struct OverlayView: View {
 
     private static let pillHeight: CGFloat = 46
 
+    /// Good news steps back; everything else needs to be read.
+    private var pillOpacity: Double {
+        if case .settled(_, .ok) = model.state { return 0.62 }
+        return 0.86
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             switch model.state {
@@ -34,7 +40,7 @@ struct OverlayView: View {
                 Image(systemName: tone == .ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                     .foregroundStyle(tone == .ok ? Color.green : Color.orange)
                 Text(message)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.white.opacity(tone == .ok ? 0.85 : 1))
                     .lineLimit(1)
             }
         }
@@ -42,7 +48,7 @@ struct OverlayView: View {
         .padding(.horizontal, 18)
         .frame(height: Self.pillHeight)
         .frame(maxWidth: OverlayPanel.size.width - 24)
-        .background(Capsule().fill(Color.black.opacity(0.86)))
+        .background(Capsule().fill(Color.black.opacity(pillOpacity)))
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
         .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
         .frame(width: OverlayPanel.size.width, height: OverlayPanel.size.height)
