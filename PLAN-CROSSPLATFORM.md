@@ -108,6 +108,6 @@ timeout so chunk sends and reads interleave), `LiveTranscriber` / `LiveTranscrip
 Key `GEMINI_API_KEY`. Price ≈ $6 per 100k words ($0.005/min audio in + $0.004/min text out); free
 tier while in preview. Wire key `google/gemini-3.5-transcribe-live`.
 
-**OpenRouter.** 2.5 → `google/gemini-3.5-flash-lite` (~$0.70 / 100k words) and `google/gemini-3.7-flash`
-(~$1.45); the Rust polisher default follows to 3.5-flash-lite. Old wire keys stop parsing: settings
+**OpenRouter.** One general model as the comparison point: `google/gemini-3.7-flash` (~$1.45 / 100k
+words). Flash-Lite stays only as the Rust polisher's model (tiny prompts, fastest). Old wire keys stop parsing: settings
 fall back to the default engine, archived bake-off rows keep their strings.

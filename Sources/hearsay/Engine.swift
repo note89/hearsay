@@ -6,15 +6,20 @@ enum PrivacyClass: Equatable {
     case cloud
 }
 
-/// The OpenRouter models hearsay knows how to price and label. Adding one is one case + one row.
+/// The general LLMs hearsay will transcribe with via OpenRouter. One at a time: the dedicated ASR
+/// engines are the product, this is the comparison point. Adding one is one case + one row.
 enum OpenRouterModel: String, CaseIterable, Equatable {
-    case geminiFlashLite = "google/gemini-3.5-flash-lite"
     case geminiFlash = "google/gemini-3.7-flash"
 
     var pricePer100kWords: String {
         switch self {
-        case .geminiFlashLite: return "~$0.70 per 100k words"
         case .geminiFlash: return "~$1.45 per 100k words"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .geminiFlash: return "Gemini 3.7 Flash"
         }
     }
 }
@@ -53,7 +58,7 @@ enum Engine: Equatable {
     var label: String {
         switch self {
         case .appleLocal: return "Apple on-device ($0)"
-        case .openRouter(let model): return "OpenRouter · \(model.rawValue)"
+        case .openRouter(let model): return "Google · \(model.label) (via OpenRouter)"
         case .elevenLabsScribe: return "ElevenLabs · Scribe v2"
         case .geminiTranscribeLive: return "Google · Gemini 3.5 Transcribe (live)"
         }
@@ -62,7 +67,7 @@ enum Engine: Equatable {
     var detail: String {
         switch self {
         case .appleLocal: return "SpeechAnalyzer on the Neural Engine, works offline · $0"
-        case .openRouter(let model): return "Google cloud via OpenRouter · \(model.pricePer100kWords)"
+        case .openRouter(let model): return "General LLM listening to the audio, via OpenRouter · \(model.pricePer100kWords)"
         case .elevenLabsScribe: return "ElevenLabs Scribe v2 cloud, dedicated ASR, 90+ languages, mixes them mid-sentence · ~$2.45 per 100k words"
         case .geminiTranscribeLive: return "Google cloud, streaming ASR with live partials, 85+ languages, mixes them mid-sentence · ~$6 per 100k words, free tier in preview"
         }

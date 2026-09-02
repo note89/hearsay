@@ -39,25 +39,30 @@ impl WhisperModel {
     }
 }
 
+/// The general LLMs hearsay will transcribe with via OpenRouter. One at a time: the dedicated ASR
+/// engines are the product, this is the comparison point. Adding one is one variant + one row.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum OpenRouterModel {
-    GeminiFlashLite,
     GeminiFlash,
 }
 
 impl OpenRouterModel {
-    pub const ALL: [OpenRouterModel; 2] = [OpenRouterModel::GeminiFlashLite, OpenRouterModel::GeminiFlash];
+    pub const ALL: [OpenRouterModel; 1] = [OpenRouterModel::GeminiFlash];
 
     pub fn id(self) -> &'static str {
         match self {
-            OpenRouterModel::GeminiFlashLite => "google/gemini-3.5-flash-lite",
             OpenRouterModel::GeminiFlash => "google/gemini-3.7-flash",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            OpenRouterModel::GeminiFlash => "Gemini 3.7 Flash",
         }
     }
 
     pub fn price_per_100k_words(self) -> &'static str {
         match self {
-            OpenRouterModel::GeminiFlashLite => "~$0.70 per 100k words",
             OpenRouterModel::GeminiFlash => "~$1.45 per 100k words",
         }
     }
@@ -103,7 +108,7 @@ impl Engine {
     pub fn label(&self) -> String {
         match self {
             Engine::Whisper(m) => format!("Whisper · {} (local, $0)", m.id()),
-            Engine::OpenRouter(m) => format!("OpenRouter · {}", m.id()),
+            Engine::OpenRouter(m) => format!("Google · {} (via OpenRouter)", m.label()),
             Engine::ElevenLabsScribe => "ElevenLabs · Scribe v2".to_string(),
             Engine::GeminiTranscribeLive => "Google · Gemini 3.5 Transcribe (live)".to_string(),
         }
@@ -112,7 +117,7 @@ impl Engine {
     pub fn detail(&self) -> String {
         match self {
             Engine::Whisper(m) => format!("whisper.cpp on this machine, works offline · {}", m.blurb()),
-            Engine::OpenRouter(m) => format!("Google cloud via OpenRouter · {}", m.price_per_100k_words()),
+            Engine::OpenRouter(m) => format!("General LLM listening to the audio, via OpenRouter · {}", m.price_per_100k_words()),
             Engine::ElevenLabsScribe => "ElevenLabs Scribe v2 cloud, dedicated ASR, 90+ languages, mixes them mid-sentence · ~$2.45 per 100k words".to_string(),
             Engine::GeminiTranscribeLive => "Google cloud, streaming ASR with live partials, 85+ languages, mixes them mid-sentence · ~$6 per 100k words, free tier in preview".to_string(),
         }

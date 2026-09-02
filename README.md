@@ -102,7 +102,7 @@ menu bar → **Open hearsay…** window:
 | **Apple on-device** (default) | this Mac, offline | $0 | picked by you (no auto-detect) |
 | ElevenLabs Scribe v2 | ElevenLabs cloud | ~$2.45 / 100k words | automatic, mid-sentence mixing |
 | Gemini 3.5 Transcribe (live) | Google cloud, streaming | ~$6 / 100k words (free tier in preview) | automatic, mid-sentence mixing |
-| Gemini 3.5 Flash‑Lite / 3.7 Flash | Google via OpenRouter | ~$0.70 – $1.45 / 100k words | automatic |
+| Gemini 3.7 Flash | general LLM via OpenRouter | ~$1.45 / 100k words | automatic |
 
 Mixing languages mid-sentence (svengelska) works with Scribe v2 and the Gemini engines. Apple's on-device
 model is locked to one locale per dictation, so it can only do one language at a time.
@@ -112,8 +112,8 @@ show in the pill, and the final text is ready almost as you release. Your dictio
 custom vocabulary, and with Style Light/Full it runs the model's own filler removal.
 
 Cloud engines are optional comparison tools: Open hearsay… → **Dictation** → **API Keys…** opens
-`~/Library/Application Support/hearsay/keys.env` (0600, template included). `OPENROUTER_API_KEY`, `GEMINI_API_KEY`
-unlocks both Geminis; `ELEVEN_LABS_API_KEY` unlocks Scribe. ElevenLabs is not reachable via
+`~/Library/Application Support/hearsay/keys.env` (0600, template included). `GEMINI_API_KEY` unlocks
+Gemini 3.5 Transcribe, `OPENROUTER_API_KEY` unlocks Gemini 3.7 Flash, `ELEVEN_LABS_API_KEY` unlocks Scribe. ElevenLabs is not reachable via
 OpenRouter — separate key.
 
 ## Privacy, precisely
