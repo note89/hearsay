@@ -1,7 +1,7 @@
 //! The settings window's panes: sections are concepts (Dictation · Dictionary · Style · Bake-off · History).
 
 use crate::app::{App, EngineStatus, Phase};
-use hearsay_core::bakeoff::{RivalOutcome, RunSummary, SCRIPT};
+use hearsay_core::bakeoff::{RivalOutcome, RunSummary, ScoredOutcome, SCRIPT};
 use hearsay_core::engine::{Engine, PrivacyClass};
 use hearsay_core::lexicon::{self, LexiconEntry};
 use hearsay_core::scorer::{self, DiffVerdict};
@@ -168,24 +168,35 @@ pub fn style(app: &mut App, ui: &mut egui::Ui) {
 }
 
 pub fn bakeoff(app: &mut App, ui: &mut egui::Ui) {
-    header(ui, "Bake-off", "Same audio, same key-up, one clock. Run a rival alongside. While this pane is front and the window focused, dictations score instead of inserting.");
+    header(ui, "Bake-off", "Same audio, same key-up, one clock, every engine at once. Run a rival alongside. While this pane is front and the window focused, dictations score instead of inserting. Engines are scored on their raw text — Style is a separate concept.");
     let idle = matches!(app.phase, Phase::Idle | Phase::Settled(..));
+    ui.horizontal_wrapped(|ui| {
+        for engine in Engine::all() {
+            let runnable = app.engine_is_runnable(engine);
+            let racing = app.settings.is_racing(engine) && runnable;
+            let label = if runnable { engine.short_label() } else { format!("{} · needs {}", engine.short_label(), if matches!(engine, Engine::Whisper(_)) { "model" } else { "key" }) };
+            ui.add_enabled_ui(runnable && idle, |ui| {
+                if ui.selectable_label(racing, label).clicked() {
+                    app.settings.toggle_racing(engine);
+                }
+            });
+        }
+    });
     ui.horizontal(|ui| {
-        ui.label(format!("Engine: {}", app.active_engine().label()));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.add_enabled(idle && (!app.bakeoff.records.is_empty() || app.bakeoff.archived_run_count() > 0), egui::Button::new("Delete all runs")).clicked() {
+            if ui.add_enabled(idle && (!app.bakeoff.takes.is_empty() || app.bakeoff.archived_run_count() > 0), egui::Button::new("Delete all runs")).clicked() {
                 app.bakeoff.delete_all_runs();
             }
-            if ui.add_enabled(idle && !app.bakeoff.records.is_empty(), egui::Button::new("Archive & reset run")).clicked() {
+            if ui.add_enabled(idle && !app.bakeoff.takes.is_empty(), egui::Button::new("Archive & reset run")).clicked() {
                 app.bakeoff.reset_run();
             }
-            if ui.add_enabled(idle && !app.bakeoff.records.is_empty(), egui::Button::new("Retake last")).clicked() {
+            if ui.add_enabled(idle && !app.bakeoff.takes.is_empty(), egui::Button::new("Retake last")).clicked() {
                 app.bakeoff.delete_last();
             }
         });
     });
     ui.add_space(8.0);
-    let position = app.bakeoff.records.len();
+    let position = app.bakeoff.takes.len();
     card(ui, |ui| {
         if let Some(sentence) = SCRIPT.get(position) {
             ui.label(egui::RichText::new(format!("sentence {} of {} · {}", position + 1, SCRIPT.len(), sentence.language)).small().weak());
@@ -197,43 +208,68 @@ pub fn bakeoff(app: &mut App, ui: &mut egui::Ui) {
     ui.add_space(8.0);
     ui.add(egui::TextEdit::multiline(&mut app.bakeoff_text).hint_text("click here, hold Ctrl+Alt+Space, read the sentence, release").desired_rows(4).desired_width(f32::INFINITY));
     ui.add_space(8.0);
-    let summary = RunSummary::from_records(&app.bakeoff.records);
-    ui.horizontal(|ui| {
-        for engine in &summary.engines {
+    let summary = RunSummary::from_takes(&app.bakeoff.takes);
+    ui.horizontal_wrapped(|ui| {
+        for engine in &summary.leaderboard {
             card(ui, |ui| {
-                ui.label(egui::RichText::new(format!("{} — {} scored", Engine::parse(&engine.engine_key).map(|e| e.label()).unwrap_or(engine.engine_key.clone()).to_uppercase(), engine.takes)).small().weak());
-                ui.label(egui::RichText::new(format!("{} · {} ms to text ready", percent(engine.mean_ours_wer), engine.mean_ours_ms)).strong().color(egui::Color32::LIGHT_GREEN));
-                ui.label(egui::RichText::new(format!("rival, same takes: {} · {} ms to text visible", percent(engine.mean_rival_wer), engine.mean_rival_ms)).small().color(egui::Color32::from_rgb(255, 166, 87)));
+                let failed = if engine.failed > 0 { format!(" · {} failed", engine.failed) } else { String::new() };
+                ui.label(egui::RichText::new(format!("{} — {} scored{failed}", name(&engine.engine_key).to_uppercase(), engine.scored)).small().weak());
+                if engine.scored > 0 {
+                    ui.label(egui::RichText::new(format!("{} · {} ms to text ready", percent(engine.mean_ours_wer), engine.mean_ours_ms)).strong().color(egui::Color32::LIGHT_GREEN));
+                } else {
+                    ui.label(egui::RichText::new("no text yet").strong().weak());
+                }
+                if engine.decided() > 0 {
+                    let ties = if engine.ties > 0 { format!(" ({} tied)", engine.ties) } else { String::new() };
+                    ui.label(egui::RichText::new(format!("vs rival {}–{}{ties} · rival {} · {} ms", engine.wins, engine.losses, percent(engine.mean_rival_wer), engine.mean_rival_ms)).small().color(egui::Color32::from_rgb(255, 166, 87)));
+                }
             });
         }
     });
-    if summary.decided() >= 3 {
-        let verdict = if summary.wins >= summary.losses { format!("🏆 hearsay wins {} · rival {}", summary.wins, summary.losses) } else { format!("rival leads {} · hearsay {}", summary.losses, summary.wins) };
-        ui.label(egui::RichText::new(format!("{verdict}{} — by WER only", if summary.ties > 0 { format!(" · ties {}", summary.ties) } else { String::new() })).strong());
+    if let Some(leader) = summary.leader().filter(|l| l.decided() >= 3) {
+        let verdict = if leader.wins >= leader.losses {
+            format!("🏆 {} leads at {} · {} ms, and beats the rival {}–{} — by WER only", name(&leader.engine_key), percent(leader.mean_ours_wer), leader.mean_ours_ms, leader.wins, leader.losses)
+        } else {
+            format!("{} leads our side at {}, but the rival wins {}–{} — by WER only", name(&leader.engine_key), percent(leader.mean_ours_wer), leader.losses, leader.wins)
+        };
+        ui.label(egui::RichText::new(verdict).strong());
     }
     ui.add_space(8.0);
     for (index, take) in summary.takes.iter().enumerate().rev() {
         card(ui, |ui| {
-            ui.label(egui::RichText::new(format!("{}  {}", index + 1, take.expected)).small());
-            ui.horizontal_top(|ui| {
-                ui.vertical(|ui| {
-                    ui.set_width(300.0);
-                    ui.label(egui::RichText::new(format!("{} · {} ms", percent(take.ours_wer), take.record.ours_ms)).strong().color(egui::Color32::LIGHT_GREEN));
-                    diff_text(ui, &take.expected, &take.record.ours);
-                });
-                ui.vertical(|ui| {
-                    ui.set_width(300.0);
-                    match (&take.record.rival, take.rival_wer) {
-                        (RivalOutcome::Landed { text, ms }, Some(wer)) => {
-                            ui.label(egui::RichText::new(format!("{} · {ms} ms", percent(wer))).strong().color(egui::Color32::from_rgb(255, 166, 87)));
-                            diff_text(ui, &take.expected, text);
+            ui.label(egui::RichText::new(format!("{}  {}", index + 1, take.expected)).strong());
+            for result in &take.results {
+                ui.horizontal_top(|ui| {
+                    ui.label(egui::RichText::new(name(&result.engine)).small().color(egui::Color32::LIGHT_GREEN));
+                    ui.vertical(|ui| match &result.outcome {
+                        ScoredOutcome::Scored { ours, ms, wer } => {
+                            ui.label(egui::RichText::new(format!("{} · {ms} ms", percent(*wer))).strong().color(egui::Color32::LIGHT_GREEN));
+                            diff_text(ui, &take.expected, ours);
                         }
-                        (rival, _) => { ui.label(egui::RichText::new(rival.status()).italics().weak()); }
+                        ScoredOutcome::Failed { reason } => {
+                            ui.label(egui::RichText::new(reason).italics().weak());
+                        }
+                    });
+                });
+            }
+            ui.horizontal_top(|ui| {
+                ui.label(egui::RichText::new("rival").small().color(egui::Color32::from_rgb(255, 166, 87)));
+                ui.vertical(|ui| match (&take.take.rival, take.rival_wer) {
+                    (RivalOutcome::Landed { text, ms }, Some(wer)) => {
+                        ui.label(egui::RichText::new(format!("{} · {ms} ms", percent(wer))).strong().color(egui::Color32::from_rgb(255, 166, 87)));
+                        diff_text(ui, &take.expected, text);
+                    }
+                    (rival, _) => {
+                        ui.label(egui::RichText::new(rival.status()).italics().weak());
                     }
                 });
             });
         });
     }
+}
+
+fn name(engine_key: &str) -> String {
+    Engine::parse(engine_key).map(|e| e.short_label()).unwrap_or_else(|| engine_key.to_string())
 }
 
 fn diff_text(ui: &mut egui::Ui, reference: &str, hypothesis: &str) {

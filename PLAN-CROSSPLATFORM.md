@@ -111,3 +111,7 @@ tier while in preview. Wire key `google/gemini-3.5-transcribe-live`.
 **OpenRouter.** One general model as the comparison point: `google/gemini-3.7-flash` (~$1.45 / 100k
 words). Flash-Lite stays only as the Rust polisher's model (tiny prompts, fastest). Old wire keys stop parsing: settings
 fall back to the default engine, archived bake-off rows keep their strings.
+
+**The race (2026-09-02).** Multi-engine bake-off, designed in PLAN.md ("the race"). Rust: one worker thread per
+contender, live contenders fed from the UI loop each frame, `PendingTake` completes when every contender
+reported and the rival was observed; `Take::from_jsonl` / `to_jsonl` share the flat row format with the Mac app.

@@ -63,7 +63,7 @@ enum BakeoffTarget {
 /// ("Run" is reserved for the bake-off's multi-take run.)
 enum SessionPlan {
     case dictate(DictationDestination)
-    case bakeoff(BakeoffTarget, expected: String?, runID: UUID)
+    case bakeoff(BakeoffTarget, expected: String?, runID: UUID, takeID: UUID)
 }
 
 enum FinishingStep {
@@ -71,10 +71,12 @@ enum FinishingStep {
     case polishing
     case inserting
     case watchingRival
+    case racing(Int)
 
     var label: String {
         switch self {
         case .transcribing: return "transcribing"
+        case .racing(let count): return "racing \(count)"
         case .polishing: return "polishing"
         case .inserting: return "inserting"
         case .watchingRival: return "watching rival"
@@ -90,9 +92,16 @@ struct SessionTiming {
     var total: Duration { transcribe + polish + insert }
 }
 
+/// How a race ended: the first engine with text, and what the rival did.
+struct RaceOutcome {
+    let fastest: (engine: Engine, ms: Duration)?
+    let rival: RivalObservation
+    let app: String
+}
+
 enum SessionOutcome {
     case landed(InsertionOutcome, InsertableText, SessionTiming, app: String)
-    case compared(InsertableText, ours: Duration, rival: RivalObservation, app: String)
+    case compared(RaceOutcome)
     case nothingHeard
     case blockedSecure
     case failed(reason: String, salvaged: String?, app: String)
@@ -111,28 +120,37 @@ enum GestureStatus: Equatable {
     case denied
 }
 
+/// One engine hearing the utterance. A dictation has one; a race has one per engine.
+struct Contender {
+    let engine: Engine
+    let transcription: Task<RawTranscript, Error>
+}
+
 @MainActor
 final class LiveSession {
     let token: UUID
     let rules: SessionRules
     let plan: SessionPlan
-    let transcription: Task<RawTranscript, Error>
+    /// Never empty. A dictation's only contender is the active engine.
+    let contenders: [Contender]
     var partial = ""
     var rivalWatch: Task<RivalObservation, Never>?
+    /// Key-up: every contender's clock starts here.
+    var releasedAt: ContinuousClock.Instant?
 
-    init(token: UUID, rules: SessionRules, plan: SessionPlan, transcription: Task<RawTranscript, Error>) {
+    init(token: UUID, rules: SessionRules, plan: SessionPlan, contenders: [Contender]) {
         self.token = token
         self.rules = rules
         self.plan = plan
-        self.transcription = transcription
+        self.contenders = contenders
     }
 
     var appName: String {
         switch plan {
         case .dictate(.field(let target)): return target.app.name
         case .dictate(.clipboardOnly): return "—"
-        case .bakeoff(.watchable(let target, _), _, _): return target.app.name
-        case .bakeoff(.unobservable(let app), _, _): return app
+        case .bakeoff(.watchable(let target, _), _, _, _): return target.app.name
+        case .bakeoff(.unobservable(let app), _, _, _): return app
         }
     }
 }
@@ -347,20 +365,26 @@ final class Coordinator {
         let plan: SessionPlan
         if let armed = armedTarget, armed.app.pid == ProcessInfo.processInfo.processIdentifier,
            case .textElement = armed.focused, bakeoffPaneVisible {
-            let position = bakeoff.records.count
+            let position = bakeoff.takes.count
             let expected = position < BakeoffScript.sentences.count ? BakeoffScript.sentences[position].text : nil
             if let baseline = armed.currentText() {
-                plan = .bakeoff(.watchable(armed, baseline: baseline), expected: expected, runID: bakeoff.runID)
+                plan = .bakeoff(.watchable(armed, baseline: baseline), expected: expected, runID: bakeoff.runID, takeID: UUID())
             } else {
-                plan = .bakeoff(.unobservable(app: armed.app.name), expected: expected, runID: bakeoff.runID)
+                plan = .bakeoff(.unobservable(app: armed.app.name), expected: expected, runID: bakeoff.runID, takeID: UUID())
             }
         } else if let armed = armedTarget {
             plan = .dictate(.field(armed))
         } else {
             plan = .dictate(.clipboardOnly)
         }
+        let lineup: [(engine: Engine, transcriber: any Transcriber)]
+        if case .bakeoff = plan {
+            lineup = racingLineup()
+        } else {
+            lineup = [(activeEngine, transcriber)]
+        }
         overlay.place(Self.placement(for: plan))
-        overlay.setBadge(Self.badge(for: rules.engine))
+        overlay.setBadge(lineup.count > 1 ? "racing \(lineup.count)" : Self.badge(for: rules.engine))
         let audio: AsyncStream<AVAudioPCMBuffer>
         do {
             audio = try capture.start { [weak self] level in
@@ -375,19 +399,24 @@ final class Coordinator {
         let token = UUID()
         // dictionary → transcription and style → transcription, in one object every engine receives.
         let hints = TranscriptionHints(vocabulary: rules.lexicon.terms, mode: rules.polish == .off ? .verbatim : .smart)
-        let events = transcriber.transcribe(audio, hints: hints)
-        let transcription = Task { [weak self] () throws -> RawTranscript in
-            var final: RawTranscript?
-            for try await event in events {
-                switch event {
-                case .partial(let text): self?.partial(text, token: token)
-                case .final(let transcript): final = transcript
+        // The pill follows one streaming engine; the others race silently.
+        let pillEngine = lineup.first { $0.engine.deliversPartials }?.engine
+        let contenders = zip(lineup, Self.fanOut(audio, count: lineup.count)).map { entry, stream in
+            let (engine, engineTranscriber) = entry
+            let reportsPartials = engine == pillEngine
+            return Contender(engine: engine, transcription: Task { [weak self] () throws -> RawTranscript in
+                var final: RawTranscript?
+                for try await event in engineTranscriber.transcribe(stream, hints: hints) {
+                    switch event {
+                    case .partial(let text): if reportsPartials { self?.partial(text, token: token) }
+                    case .final(let transcript): final = transcript
+                    }
                 }
-            }
-            guard let final else { throw TranscriptionFailure.endedWithoutFinal }
-            return final
+                guard let final else { throw TranscriptionFailure.endedWithoutFinal }
+                return final
+            })
         }
-        phase = .listening(LiveSession(token: token, rules: rules, plan: plan, transcription: transcription))
+        phase = .listening(LiveSession(token: token, rules: rules, plan: plan, contenders: contenders))
         overlay.render(.listening(partial: ""))
     }
 
@@ -397,16 +426,44 @@ final class Coordinator {
             return
         }
         capture.stop()
-        if case .bakeoff(.watchable(let target, let baseline), _, _) = session.plan {
+        session.releasedAt = clock.now
+        if case .bakeoff(.watchable(let target, let baseline), _, _, _) = session.plan {
             let since = clock.now
             session.rivalWatch = Task {
                 await RivalWatch.observe(read: { target.currentText() }, baseline: baseline, since: since, timeout: Self.rivalTimeout)
             }
         }
-        phase = .finishing(session, .transcribing)
-        overlay.render(.working(FinishingStep.transcribing.label))
+        let step: FinishingStep = session.contenders.count > 1 ? .racing(session.contenders.count) : .transcribing
+        phase = .finishing(session, step)
+        overlay.render(.working(step.label))
         log.notice("released: partial length \(session.partial.count)")
         Task { await finish(session) }
+    }
+
+    /// The engines a take races: the user's selection minus any without a key. Never empty.
+    private func racingLineup() -> [(engine: Engine, transcriber: any Transcriber)] {
+        let chosen = Engine.all.filter { $0.isAvailable && settings.isRacing($0) }
+        let lineup: [(engine: Engine, transcriber: any Transcriber)] = chosen.compactMap { engine in
+            if engine == activeEngine { return (engine, transcriber) }
+            return engine.makeTranscriber(locale: settings.locale).map { (engine, $0) }
+        }
+        return lineup.isEmpty ? [(activeEngine, transcriber)] : lineup
+    }
+
+    /// One microphone, several listeners: every buffer reaches every stream, and no listener can
+    /// slow another. Buffers are shared, not copied, and a stream holds at most one take's worth,
+    /// so the buffering is unbounded on purpose — dropping audio for a slower engine would be a
+    /// wrong measurement. One listener gets the source itself.
+    private static func fanOut(_ source: AsyncStream<AVAudioPCMBuffer>, count: Int) -> [AsyncStream<AVAudioPCMBuffer>] {
+        guard count > 1 else { return [source] }
+        let copies = (0..<count).map { _ in AsyncStream<AVAudioPCMBuffer>.makeStream() }
+        Task.detached {
+            for await buffer in source {
+                for copy in copies { copy.continuation.yield(buffer) }
+            }
+            for copy in copies { copy.continuation.finish() }
+        }
+        return copies.map(\.stream)
     }
 
     private func meter(_ level: AudioLevel) {
@@ -427,12 +484,19 @@ final class Coordinator {
     }
 
     private func finish(_ session: LiveSession) async {
+        switch session.plan {
+        case .dictate(let destination): await finishDictation(session, into: destination)
+        case .bakeoff(let target, let expected, let runID, let takeID): await finishRace(session, target: target, expected: expected, runID: runID, takeID: takeID)
+        }
+    }
+
+    private func finishDictation(_ session: LiveSession, into destination: DictationDestination) async {
         var timing = SessionTiming()
 
         let transcribeStart = clock.now
         let raw: RawTranscript
         do {
-            raw = try await Self.value(of: session.transcription, within: Self.transcriptionTimeout)
+            raw = try await Self.value(of: session.contenders[0].transcription, within: Self.transcriptionTimeout)
         } catch {
             session.rivalWatch?.cancel()
             log.error("finish: transcription failed: \(String(describing: error))")
@@ -474,39 +538,63 @@ final class Coordinator {
             delivered = .rewritten(text: rewritten, over: delivered)
         }
 
-        switch session.plan {
-        case .dictate(let destination):
-            phase = .finishing(session, .inserting)
-            overlay.render(.working(FinishingStep.inserting.label))
-            let insertStart = clock.now
-            let outcome: InsertionOutcome
-            switch destination {
-            case .field(let target): outcome = await Inserter.insert(delivered.text, into: target)
-            case .clipboardOnly: outcome = Inserter.copyToClipboard(delivered.text, because: .noFrontmostApp)
-            }
-            timing.insert = clock.now - insertStart
-            lastTiming = timing
-            log.notice("session: transcribe \(timing.transcribe.milliseconds) ms · polish \(timing.polish.milliseconds) ms · insert \(timing.insert.milliseconds) ms · \(Self.summary(of: outcome), privacy: .public)")
-            settle(.landed(outcome, delivered, timing, app: session.appName))
-
-        case .bakeoff(let bakeoffTarget, let expected, let runID):
-            phase = .finishing(session, .watchingRival)
-            overlay.render(.working(FinishingStep.watchingRival.label))
-            let ours = timing.transcribe + timing.polish
-            let rival: RivalObservation
-            switch bakeoffTarget {
-            case .watchable: rival = await session.rivalWatch?.value ?? .unobservable
-            case .unobservable: rival = .unobservable
-            }
-            lastTiming = timing
-            if runID == bakeoff.runID {
-                bakeoff.append(BakeoffRecord(app: session.appName, engine: session.rules.engine.wireKey, expected: expected, spoken: delivered.spoken, ours: delivered.text, oursMs: ours.milliseconds, rival: rival))
-            } else {
-                log.notice("finish: bake-off run was reset during the take — record dropped")
-            }
-            log.notice("bakeoff: ours \(ours.milliseconds) ms · rival \(Self.summary(of: rival), privacy: .public)")
-            settle(.compared(delivered, ours: ours, rival: rival, app: session.appName))
+        phase = .finishing(session, .inserting)
+        overlay.render(.working(FinishingStep.inserting.label))
+        let insertStart = clock.now
+        let outcome: InsertionOutcome
+        switch destination {
+        case .field(let target): outcome = await Inserter.insert(delivered.text, into: target)
+        case .clipboardOnly: outcome = Inserter.copyToClipboard(delivered.text, because: .noFrontmostApp)
         }
+        timing.insert = clock.now - insertStart
+        lastTiming = timing
+        log.notice("session: transcribe \(timing.transcribe.milliseconds) ms · polish \(timing.polish.milliseconds) ms · insert \(timing.insert.milliseconds) ms · \(Self.summary(of: outcome), privacy: .public)")
+        settle(.landed(outcome, delivered, timing, app: session.appName))
+    }
+
+    /// Every contender is scored on its raw text, each on its own clock from key-up; the rival on
+    /// the same clock. One take, every row.
+    private func finishRace(_ session: LiveSession, target: BakeoffTarget, expected: String?, runID: UUID, takeID: UUID) async {
+        let releasedAt = session.releasedAt ?? clock.now
+        let clock = self.clock
+        var results: [(index: Int, result: EngineResult)] = []
+        await withTaskGroup(of: (Int, EngineResult).self) { group in
+            for (index, contender) in session.contenders.enumerated() {
+                let key = contender.engine.wireKey
+                group.addTask {
+                    do {
+                        let raw = try await Self.value(of: contender.transcription, within: Self.transcriptionTimeout)
+                        let ms = (clock.now - releasedAt).milliseconds
+                        let outcome: EngineOutcome = raw.text.isEmpty ? .failed(reason: "nothing heard") : .scored(spoken: raw.text, ours: raw.text, ms: ms)
+                        return (index, EngineResult(engine: key, outcome: outcome))
+                    } catch {
+                        return (index, EngineResult(engine: key, outcome: .failed(reason: error is OperationTimeout ? "timed out" : "failed")))
+                    }
+                }
+            }
+            for await entry in group { results.append((entry.0, entry.1)) }
+        }
+        results.sort { $0.index < $1.index }
+
+        phase = .finishing(session, .watchingRival)
+        overlay.render(.working(FinishingStep.watchingRival.label))
+        let rival: RivalObservation
+        switch target {
+        case .watchable: rival = await session.rivalWatch?.value ?? .unobservable
+        case .unobservable: rival = .unobservable
+        }
+        let take = Take(id: takeID.uuidString, app: session.appName, expected: expected, rival: RivalOutcome(rival), results: results.map(\.result))
+        if runID == bakeoff.runID {
+            bakeoff.append(take)
+        } else {
+            log.notice("finish: bake-off run was reset during the take — take dropped")
+        }
+        let fastest = take.results.compactMap { result -> (engine: Engine, ms: Duration)? in
+            guard case .scored(_, _, let ms) = result.outcome, let engine = Engine(wireKey: result.engine) else { return nil }
+            return (engine, .milliseconds(ms))
+        }.min { $0.ms < $1.ms }
+        log.notice("bakeoff: raced \(take.results.count) · fastest \(fastest?.ms.milliseconds ?? -1) ms · rival \(Self.summary(of: rival), privacy: .public)")
+        settle(.compared(RaceOutcome(fastest: fastest, rival: rival, app: session.appName)))
     }
 
     private func settle(_ outcome: SessionOutcome) {
@@ -537,10 +625,14 @@ final class Coordinator {
         case .landed(.inserted(_, .verified), _, let timing, _): return .settled("inserted · \(timing.total.milliseconds) ms", .ok)
         case .landed(.inserted(_, .posted), _, let timing, _): return .settled("sent · \(timing.total.milliseconds) ms", .ok)
         case .landed(.copiedToClipboard(let block), _, _, _): return .settled(copiedMessage(block), .warn)
-        case .compared(_, let ours, .landed(_, let latency), _): return .settled("ours \(ours.milliseconds) ms · rival \(latency.milliseconds) ms", .ok)
-        case .compared(_, let ours, .unobservable, _): return .settled("ours \(ours.milliseconds) ms · rival unobservable — use TextEdit or Notes", .warn)
-        case .compared(_, let ours, .timedOut, _): return .settled("ours \(ours.milliseconds) ms · rival: nothing landed", .warn)
-        case .compared(_, let ours, .abandoned, _): return .settled("ours \(ours.milliseconds) ms · rival watch abandoned", .warn)
+        case .compared(let race):
+            let ours = race.fastest.map { "\($0.engine.shortLabel) \($0.ms.milliseconds) ms" } ?? "no engine answered"
+            switch race.rival {
+            case .landed(_, let latency): return .settled("\(ours) · rival \(latency.milliseconds) ms", race.fastest == nil ? .warn : .ok)
+            case .unobservable: return .settled("\(ours) · rival unobservable — use TextEdit or Notes", .warn)
+            case .timedOut: return .settled("\(ours) · rival: nothing landed", .warn)
+            case .abandoned: return .settled("\(ours) · rival watch abandoned", .warn)
+            }
         case .nothingHeard: return .settled("nothing heard", .warn)
         case .blockedSecure: return .settled("secure field — dictation blocked", .warn)
         case .failed(let reason, let salvaged, _): return .settled(salvaged != nil ? "\(reason) — draft copied" : reason, .warn)

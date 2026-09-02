@@ -7,7 +7,10 @@ use crate::settings::Settings;
 use hearsay_backends::audio::Recording;
 use hearsay_backends::hotkey::{GestureEvent, HoldGestureMonitor};
 use hearsay_backends::insert::PasteInserter;
-use hearsay_core::bakeoff::{BakeoffRecord, BakeoffStore, RivalOutcome, SCRIPT};
+use hearsay_core::bakeoff::{BakeoffStore, EngineOutcome, EngineResult, RivalOutcome, Take, SCRIPT};
+use hearsay_core::session::Transcriber;
+use std::collections::HashMap;
+use std::path::Path;
 use hearsay_core::session::{LiveTranscription, PolishMode, TranscriptMode, TranscriptionHints};
 use hearsay_engines::EngineHandle;
 use hearsay_core::engine::{Engine, PrivacyClass};
@@ -48,16 +51,18 @@ impl Section {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FinishingStep {
     Transcribing,
+    Racing(usize),
     Polishing,
     WatchingRival,
 }
 
 impl FinishingStep {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            FinishingStep::Transcribing => "transcribing",
-            FinishingStep::Polishing => "polishing",
-            FinishingStep::WatchingRival => "watching rival",
+            FinishingStep::Transcribing => "transcribing".into(),
+            FinishingStep::Racing(count) => format!("racing {count}"),
+            FinishingStep::Polishing => "polishing".into(),
+            FinishingStep::WatchingRival => "watching rival".into(),
         }
     }
 }
@@ -68,15 +73,16 @@ pub struct Session {
     hints: TranscriptionHints,
 }
 
-/// The take in the shape its engine finishes it: all the audio for a batch engine, the open session for a live one.
-enum Take {
-    Batch { samples: Vec<f32>, handle: EngineHandle },
-    Live(Box<dyn LiveTranscription>),
+/// One engine hearing the utterance. A dictation has one; a race has one per engine.
+pub struct Contender {
+    engine: Engine,
+    hearing: Hearing,
 }
 
-/// Where the audio goes while the key is held: nowhere yet (batch), or up the wire (live).
-pub enum Feed {
-    Batch,
+/// How a contender hears: a batch engine gets the whole take at release (`None` = its model is
+/// loaded on the worker), a live engine is fed while the key is held.
+pub enum Hearing {
+    Batch(Option<Arc<dyn Transcriber>>),
     Live(Box<dyn LiveTranscription>),
 }
 
@@ -84,15 +90,17 @@ pub enum Feed {
 #[derive(Clone, Debug)]
 pub enum SessionOutcome {
     Landed { outcome: InsertionOutcome, total_ms: u64 },
-    Compared { ours_ms: u64, rival: RivalOutcome },
+    /// How a race ended: the first engine with text, and what the rival did.
+    Compared { fastest: Option<(Engine, u64)>, rival: RivalOutcome },
     NothingHeard,
     Failed { reason: String, salvaged: bool },
 }
 
 pub enum Phase {
     Idle,
-    Listening(Session, Recording, Feed),
-    Finishing(Session, FinishingStep),
+    Listening(Session, Recording, Vec<Contender>),
+    /// The instant is key-up: every finishing step is bounded from it.
+    Finishing(Session, FinishingStep, Instant),
     Settled(SessionOutcome, Instant),
 }
 
@@ -103,16 +111,24 @@ enum WorkerMessage {
     NothingHeard,
     Failed(String),
     ModelReady(Result<EngineHandle, String>),
+    Raced { take_id: String, result: EngineResult },
     Downloaded(Result<(), String>),
 }
 
-/// A bake-off take waiting for its two halves: our text from the worker, the rival's from the arena buffer.
+/// A bake-off take waiting for its halves: every contender's result from the workers, the rival's
+/// text from the arena buffer.
 struct PendingTake {
+    take_id: String,
     baseline: String,
     since: Instant,
     expected: Option<String>,
     run_id: String,
-    ours: Option<(InsertableText, u64)>,
+    /// Race order, for the rows.
+    lineup: Vec<Engine>,
+    awaiting: Vec<Engine>,
+    results: Vec<EngineResult>,
+    /// When the arena first changed: the rival's latency. The text is re-read after a grace period.
+    rival_first_change: Option<Instant>,
     rival: Option<RivalOutcome>,
 }
 
@@ -143,6 +159,8 @@ pub struct App {
     hotkey: Option<HoldGestureMonitor>,
     inserter: Arc<PasteInserter>,
     engine_handle: Option<EngineHandle>,
+    /// Engines built for races beyond the active one. Cloud engines are cheap to build and cached here.
+    engine_handles: HashMap<Engine, EngineHandle>,
     polisher: Option<Arc<dyn Polisher>>,
     pending_take: Option<PendingTake>,
     worker_tx: Sender<WorkerMessage>,
@@ -159,6 +177,8 @@ const SETTLE_FADE: Duration = Duration::from_millis(250);
 const BAKEOFF_DISPLAY: Duration = Duration::from_secs(4);
 const RIVAL_TIMEOUT: Duration = Duration::from_secs(8);
 const RIVAL_GRACE: Duration = Duration::from_millis(400);
+/// No engine, polish or rival watch may hold a session longer than this after key-up.
+const FINISH_TIMEOUT: Duration = Duration::from_secs(20);
 
 impl App {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
@@ -190,6 +210,7 @@ impl App {
             hotkey,
             inserter: Arc::new(PasteInserter::new()),
             engine_handle: None,
+            engine_handles: HashMap::new(),
             pending_take: None,
             worker_tx,
             worker_rx,
@@ -259,7 +280,7 @@ impl App {
             EngineStatus::Ready => match &self.phase {
                 Phase::Idle | Phase::Settled(..) => if self.bakeoff_pane_visible { "bake-off pane open — dictating into it scores".into() } else { "hold Ctrl+Alt+Space to dictate".into() },
                 Phase::Listening(..) => "listening…".into(),
-                Phase::Finishing(_, step) => format!("{}…", step.label()),
+                Phase::Finishing(_, step, _) => format!("{}…", step.label()),
             },
         }
     }
@@ -284,82 +305,148 @@ impl App {
         // Bake-off iff the text would land in our own arena: the pane is front and this window is focused.
         let bakeoff = self.bakeoff_pane_visible && ctx.input(|i| i.viewport().focused.unwrap_or(false));
         let plan = if bakeoff {
-            let position = self.bakeoff.records.len();
-            SessionPlan::Bakeoff { expected: SCRIPT.get(position).map(|s| s.text.to_string()), run_id: self.bakeoff.run_id.clone() }
+            let position = self.bakeoff.takes.len();
+            SessionPlan::Bakeoff {
+                expected: SCRIPT.get(position).map(|s| s.text.to_string()),
+                run_id: self.bakeoff.run_id.clone(),
+                take_id: uuid::Uuid::new_v4().to_string(),
+                engines: self.racing_engines(),
+            }
         } else {
             SessionPlan::Dictate
         };
-        let Some(handle) = self.engine_handle.clone() else {
+        if self.engine_handle.is_none() {
             self.settle(SessionOutcome::Failed { reason: "engine not ready".into(), salvaged: false });
             return;
-        };
+        }
         // dictionary → transcription and style → transcription, in one object every engine receives.
         let hints = TranscriptionHints {
             vocabulary: rules.lexicon.terms.clone(),
             mode: match rules.polish { PolishMode::Off => TranscriptMode::Verbatim, PolishMode::Light | PolishMode::Full => TranscriptMode::Smart },
         };
+        let lineup: Vec<Engine> = match &plan {
+            SessionPlan::Bakeoff { engines, .. } => engines.clone(),
+            SessionPlan::Dictate => vec![rules.engine],
+        };
         match Recording::start() {
             Ok(recording) => {
-                let feed = match handle {
-                    EngineHandle::Batch(_) => Feed::Batch,
-                    EngineHandle::Live(live) => Feed::Live(live.start(&hints)),
-                };
+                let contenders: Vec<Contender> = lineup.into_iter().map(|engine| Contender { engine, hearing: self.hearing_for(engine, &hints) }).collect();
                 self.overlay_partial.clear();
-                self.phase = Phase::Listening(Session { rules, plan, hints }, recording, feed);
+                self.phase = Phase::Listening(Session { rules, plan, hints }, recording, contenders);
             }
             Err(e) => self.settle(SessionOutcome::Failed { reason: format!("microphone: {e}"), salvaged: false }),
         }
     }
 
     fn released(&mut self) {
-        let Phase::Listening(session, recording, feed) = std::mem::replace(&mut self.phase, Phase::Idle) else { return };
-        if let SessionPlan::Bakeoff { expected, run_id } = &session.plan {
-            self.pending_take = Some(PendingTake { baseline: self.bakeoff_text.clone(), since: Instant::now(), expected: expected.clone(), run_id: run_id.clone(), ours: None, rival: None });
-        }
-        let Some(handle) = self.engine_handle.clone() else {
-            self.settle(SessionOutcome::Failed { reason: "engine not ready".into(), salvaged: false });
-            return;
-        };
-        let polisher = self.polisher.clone();
-        let rules = session.rules.clone();
+        let Phase::Listening(session, recording, contenders) = std::mem::replace(&mut self.phase, Phase::Idle) else { return };
+        let heard_seconds = recording.seconds();
+        let tail = Arc::new(recording.take_new());
+        let samples = Arc::new(recording.stop());
         let hints = session.hints.clone();
         let tx = self.worker_tx.clone();
-        let heard_seconds = recording.seconds();
-        let take: Take = match feed {
-            Feed::Batch => Take::Batch { samples: recording.stop(), handle },
-            Feed::Live(mut live) => {
-                live.feed(&recording.take_new());
-                drop(recording);
-                Take::Live(live)
+        let support = self.keys.file_path().parent().map(Path::to_path_buf).unwrap_or_else(support_dir);
+        let models_dir = self.models_dir.clone();
+        let plan = session.plan.clone();
+        match plan {
+            SessionPlan::Dictate => {
+                let Some(contender) = contenders.into_iter().next() else { return };
+                let polisher = self.polisher.clone();
+                let rules = session.rules.clone();
+                std::thread::spawn(move || {
+                    if heard_seconds < 0.1 {
+                        let _ = tx.send(WorkerMessage::NothingHeard);
+                        return;
+                    }
+                    let started = Instant::now();
+                    let raw = match hear(contender.hearing, contender.engine, &samples, &tail, &hints, &support, &models_dir) {
+                        Ok(raw) => raw,
+                        Err(reason) => {
+                            let _ = tx.send(WorkerMessage::Failed(reason));
+                            return;
+                        }
+                    };
+                    if raw.text().is_empty() {
+                        let _ = tx.send(WorkerMessage::NothingHeard);
+                        return;
+                    }
+                    let _ = tx.send(WorkerMessage::Step(FinishingStep::Polishing));
+                    let context = PolishContext { field_text: None, terms: rules.lexicon.terms.clone() };
+                    let (text, rejection) = match &polisher {
+                        Some(p) => deliver(&rules, raw, p.as_ref(), &context),
+                        None => deliver(&rules, raw, &NoPolish, &context),
+                    };
+                    let _ = tx.send(WorkerMessage::Delivered { text, ms: started.elapsed().as_millis() as u64, rejection });
+                });
+                self.phase = Phase::Finishing(session, FinishingStep::Transcribing, Instant::now());
             }
+            SessionPlan::Bakeoff { expected, run_id, take_id, engines } => {
+                self.pending_take = Some(PendingTake {
+                    take_id: take_id.clone(),
+                    baseline: self.bakeoff_text.clone(),
+                    since: Instant::now(),
+                    expected,
+                    run_id,
+                    lineup: engines.clone(),
+                    awaiting: engines.clone(),
+                    results: Vec::new(),
+                    rival_first_change: None,
+                    rival: None,
+                });
+                // Every contender is scored on its raw text, each on its own clock from key-up.
+                for contender in contenders {
+                    let (tx, samples, tail, hints, support, models_dir, take_id) = (tx.clone(), samples.clone(), tail.clone(), hints.clone(), support.clone(), models_dir.clone(), take_id.clone());
+                    std::thread::spawn(move || {
+                        let started = Instant::now();
+                        let outcome = match hear(contender.hearing, contender.engine, &samples, &tail, &hints, &support, &models_dir) {
+                            Ok(raw) if raw.text().is_empty() => EngineOutcome::Failed { reason: "nothing heard".into() },
+                            Ok(raw) => EngineOutcome::Scored { spoken: raw.text().to_string(), ours: raw.text().to_string(), ms: started.elapsed().as_millis() as u64 },
+                            Err(reason) => EngineOutcome::Failed { reason },
+                        };
+                        let _ = tx.send(WorkerMessage::Raced { take_id, result: EngineResult { engine: contender.engine.wire_key(), outcome } });
+                    });
+                }
+                let step = if engines.len() > 1 { FinishingStep::Racing(engines.len()) } else { FinishingStep::Transcribing };
+                self.phase = Phase::Finishing(session, step, Instant::now());
+            }
+        }
+    }
+
+    /// The engines a take races: the user's selection minus any without a key or model. Never empty.
+    fn racing_engines(&self) -> Vec<Engine> {
+        let lineup: Vec<Engine> = Engine::all().into_iter().filter(|e| self.settings.is_racing(*e) && self.engine_is_runnable(*e)).collect();
+        if lineup.is_empty() { vec![self.settings.engine] } else { lineup }
+    }
+
+    /// Key present for a cloud engine; model file present for a local one.
+    pub fn engine_is_runnable(&self, engine: Engine) -> bool {
+        match engine {
+            Engine::Whisper(model) => self.models_dir.join(model.file_name()).exists(),
+            Engine::OpenRouter(_) | Engine::ElevenLabsScribe | Engine::GeminiTranscribeLive => engine.is_available(&self.keys),
+        }
+    }
+
+    /// How a contender hears the take. The active engine is already loaded; cloud engines are built
+    /// on the spot and cached; a whisper model that is not loaded is loaded on the worker at release.
+    fn hearing_for(&mut self, engine: Engine, hints: &TranscriptionHints) -> Hearing {
+        let handle = if engine == self.settings.engine {
+            self.engine_handle.clone()
+        } else if let Some(cached) = self.engine_handles.get(&engine) {
+            Some(cached.clone())
+        } else if let Engine::Whisper(_) = engine {
+            None
+        } else {
+            let built = hearsay_engines::make_engine(engine, &self.keys, &self.models_dir).ok();
+            if let Some(handle) = &built {
+                self.engine_handles.insert(engine, handle.clone());
+            }
+            built
         };
-        std::thread::spawn(move || {
-            if heard_seconds < 0.1 {
-                let _ = tx.send(WorkerMessage::NothingHeard);
-                return;
-            }
-            let started = Instant::now();
-            let raw: RawTranscript = match take {
-                Take::Batch { samples, handle } => handle.transcribe(&samples, &hints),
-                Take::Live(live) => live.finish(),
-            }
-            .unwrap_or_else(|e| {
-                let _ = tx.send(WorkerMessage::Failed(e.to_string()));
-                RawTranscript::from_engine(String::new())
-            });
-            if raw.text().is_empty() {
-                let _ = tx.send(WorkerMessage::NothingHeard);
-                return;
-            }
-            let _ = tx.send(WorkerMessage::Step(FinishingStep::Polishing));
-            let context = PolishContext { field_text: None, terms: rules.lexicon.terms.clone() };
-            let (text, rejection) = match &polisher {
-                Some(p) => deliver(&rules, raw, p.as_ref(), &context),
-                None => deliver(&rules, raw, &NoPolish, &context),
-            };
-            let _ = tx.send(WorkerMessage::Delivered { text, ms: started.elapsed().as_millis() as u64, rejection });
-        });
-        self.phase = Phase::Finishing(session, FinishingStep::Transcribing);
+        match handle {
+            Some(EngineHandle::Live(live)) => Hearing::Live(live.start(hints)),
+            Some(EngineHandle::Batch(batch)) => Hearing::Batch(Some(batch)),
+            None => Hearing::Batch(None),
+        }
     }
 
     fn drain_worker(&mut self) {
@@ -375,14 +462,27 @@ impl App {
                     self.engine_status = EngineStatus::Failed;
                     self.engine_error = e;
                 }
+                WorkerMessage::Raced { take_id, result } => {
+                    if let Some(take) = self.pending_take.as_mut() {
+                        if take.take_id == take_id {
+                            take.awaiting.retain(|e| e.wire_key() != result.engine);
+                            take.results.push(result);
+                            if take.awaiting.is_empty() {
+                                if let Phase::Finishing(session, _, since) = std::mem::replace(&mut self.phase, Phase::Idle) {
+                                    self.phase = Phase::Finishing(session, FinishingStep::WatchingRival, since);
+                                }
+                            }
+                        }
+                    }
+                }
                 WorkerMessage::Downloaded(Ok(())) => self.activate_engine(),
                 WorkerMessage::Downloaded(Err(e)) => {
                     self.engine_status = EngineStatus::Failed;
                     self.engine_error = format!("download: {e}");
                 }
                 WorkerMessage::Step(step) => {
-                    if let Phase::Finishing(session, _) = std::mem::replace(&mut self.phase, Phase::Idle) {
-                        self.phase = Phase::Finishing(session, step);
+                    if let Phase::Finishing(session, _, since) = std::mem::replace(&mut self.phase, Phase::Idle) {
+                        self.phase = Phase::Finishing(session, step, since);
                     }
                 }
                 WorkerMessage::NothingHeard => {
@@ -405,7 +505,12 @@ impl App {
     }
 
     fn delivered(&mut self, text: InsertableText, ms: u64) {
-        let Phase::Finishing(session, _) = std::mem::replace(&mut self.phase, Phase::Idle) else { return };
+        let Phase::Finishing(session, _, _) = std::mem::replace(&mut self.phase, Phase::Idle) else {
+            // The session already timed out; the words are still the user's.
+            self.inserter.copy(text.text());
+            log::warn!("delivered: session was no longer finishing — text copied to the clipboard");
+            return;
+        };
         match &session.plan {
             SessionPlan::Dictate => {
                 let started = Instant::now();
@@ -424,48 +529,78 @@ impl App {
                 self.settle(SessionOutcome::Landed { outcome, total_ms: ms + insert_ms });
             }
             SessionPlan::Bakeoff { .. } => {
-                self.phase = Phase::Finishing(session, FinishingStep::WatchingRival);
-                if let Some(take) = self.pending_take.as_mut() {
-                    take.ours = Some((text, ms));
-                }
-                self.last_timing = Some((ms, 0));
+                log::error!("delivered: a bake-off take reached the dictation path — dropped");
             }
         }
     }
 
-    /// The arena is our own buffer: the rival's inserted text is whatever changed since press.
+    /// A session that outlives the cap is closed: missing contenders become timed-out rows, a
+    /// dictation fails. Late worker text still reaches the clipboard through `delivered`.
+    fn expire_finishing(&mut self) {
+        let Phase::Finishing(_, _, since) = &self.phase else { return };
+        if since.elapsed() < FINISH_TIMEOUT {
+            return;
+        }
+        match self.pending_take.as_mut() {
+            Some(take) => {
+                for engine in take.awaiting.drain(..) {
+                    take.results.push(EngineResult { engine: engine.wire_key(), outcome: EngineOutcome::Failed { reason: "timed out".into() } });
+                }
+                if take.rival.is_none() {
+                    take.rival = Some(RivalOutcome::TimedOut);
+                }
+            }
+            None => {
+                log::error!("finish: timed out after {} s", FINISH_TIMEOUT.as_secs());
+                self.settle(SessionOutcome::Failed { reason: "timed out".into(), salvaged: false });
+            }
+        }
+    }
+
+    /// The arena is our own buffer: the rival's inserted text is whatever changed since key-up.
+    /// Latency is the first change; the text is read again after a grace period so a rival that
+    /// inserts in pieces is captured whole — the same rule as the macOS watcher.
     fn watch_rival(&mut self) {
         let Some(take) = self.pending_take.as_mut() else { return };
         if take.rival.is_none() {
-            if self.bakeoff_text != take.baseline {
-                let latency = take.since.elapsed();
-                if latency >= RIVAL_GRACE || take.since.elapsed() > RIVAL_TIMEOUT {
-                    let inserted = inserted_text(&take.baseline, &self.bakeoff_text);
-                    take.rival = Some(RivalOutcome::Landed { text: inserted, ms: latency.as_millis() as u64 });
+            match take.rival_first_change {
+                Some(first_change) => {
+                    if first_change.elapsed() >= RIVAL_GRACE {
+                        let inserted = inserted_text(&take.baseline, &self.bakeoff_text);
+                        take.rival = Some(RivalOutcome::Landed { text: inserted, ms: (first_change - take.since).as_millis() as u64 });
+                    }
                 }
-            } else if take.since.elapsed() > RIVAL_TIMEOUT {
-                take.rival = Some(RivalOutcome::TimedOut);
+                None => {
+                    if self.bakeoff_text != take.baseline {
+                        take.rival_first_change = Some(Instant::now());
+                    } else if take.since.elapsed() > RIVAL_TIMEOUT {
+                        take.rival = Some(RivalOutcome::TimedOut);
+                    }
+                }
             }
         }
-        if let (Some((text, ms)), Some(rival)) = (take.ours.clone(), take.rival.clone()) {
-            let take = self.pending_take.take().expect("pending take");
-            let Phase::Finishing(session, _) = std::mem::replace(&mut self.phase, Phase::Idle) else { return };
+        if take.awaiting.is_empty() && take.rival.is_some() {
+            let mut take = self.pending_take.take().expect("pending take");
+            let Phase::Finishing(..) = std::mem::replace(&mut self.phase, Phase::Idle) else { return };
+            let rival = take.rival.take().expect("rival observed");
+            let position = |engine: &str| take.lineup.iter().position(|e| e.wire_key() == engine).unwrap_or(usize::MAX);
+            take.results.sort_by_key(|r| position(&r.engine));
+            let recorded = Take { id: take.take_id, at: hearsay_core::history::now(), app: "hearsay-rs".into(), expected: take.expected, rival: rival.clone(), results: take.results };
+            let fastest = recorded
+                .results
+                .iter()
+                .filter_map(|r| match &r.outcome {
+                    EngineOutcome::Scored { ms, .. } => Engine::parse(&r.engine).map(|e| (e, *ms)),
+                    EngineOutcome::Failed { .. } => None,
+                })
+                .min_by_key(|(_, ms)| *ms);
             if take.run_id == self.bakeoff.run_id {
-                self.bakeoff.append(BakeoffRecord {
-                    at: hearsay_core::history::now(),
-                    app: "hearsay-rs".into(),
-                    engine: session.rules.engine.wire_key(),
-                    expected: take.expected,
-                    spoken: text.spoken().to_string(),
-                    ours: text.text().to_string(),
-                    ours_ms: ms,
-                    rival: rival.clone(),
-                });
+                self.bakeoff.append(recorded);
                 self.bakeoff_text.clear();
             } else {
-                log::info!("finish: bake-off run was reset during the take — record dropped");
+                log::info!("finish: bake-off run was reset during the take — take dropped");
             }
-            self.settle(SessionOutcome::Compared { ours_ms: ms, rival });
+            self.settle(SessionOutcome::Compared { fastest, rival });
         }
     }
 
@@ -513,13 +648,23 @@ impl eframe::App for App {
             }
         }
         self.drain_worker();
+        self.expire_finishing();
         self.watch_rival();
         self.expire_settled();
-        if let Phase::Listening(_, recording, feed) = &mut self.phase {
+        if let Phase::Listening(_, recording, contenders) = &mut self.phase {
             self.overlay_level = recording.level();
-            if let Feed::Live(live) = feed {
-                live.feed(&recording.take_new());
-                self.overlay_partial = live.partial();
+            let fresh = recording.take_new();
+            let mut pill: Option<String> = None;
+            for contender in contenders.iter_mut() {
+                if let Hearing::Live(live) = &mut contender.hearing {
+                    live.feed(&fresh);
+                    if pill.is_none() {
+                        pill = Some(live.partial());
+                    }
+                }
+            }
+            if let Some(partial) = pill {
+                self.overlay_partial = partial;
             }
         }
 
@@ -571,13 +716,18 @@ impl App {
         let content: (String, egui::Color32) = match &self.phase {
             Phase::Listening(..) if !self.overlay_partial.is_empty() => (tail(&self.overlay_partial, 48), egui::Color32::from_white_alpha(220)),
             Phase::Listening(..) => ("listening…".into(), egui::Color32::from_white_alpha(150)),
-            Phase::Finishing(_, step) => (format!("{}…", step.label()), egui::Color32::from_white_alpha(200)),
+            Phase::Finishing(_, step, _) => (format!("{}…", step.label()), egui::Color32::from_white_alpha(200)),
             Phase::Settled(outcome, _) => match outcome {
                 SessionOutcome::Landed { outcome: InsertionOutcome::Inserted { evidence: InsertionEvidence::Verified }, total_ms, .. } => (format!("inserted · {total_ms} ms"), egui::Color32::LIGHT_GREEN),
                 SessionOutcome::Landed { outcome: InsertionOutcome::Inserted { evidence: InsertionEvidence::Posted }, total_ms, .. } => (format!("sent · {total_ms} ms"), egui::Color32::LIGHT_GREEN),
                 SessionOutcome::Landed { outcome: InsertionOutcome::CopiedToClipboard(_), .. } => ("copied — could not insert".into(), egui::Color32::from_rgb(255, 166, 87)),
-                SessionOutcome::Compared { ours_ms, rival: RivalOutcome::Landed { ms, .. } } => (format!("ours {ours_ms} ms · rival {ms} ms"), egui::Color32::LIGHT_GREEN),
-                SessionOutcome::Compared { ours_ms, rival } => (format!("ours {ours_ms} ms · rival {}", rival.status()), egui::Color32::from_rgb(255, 166, 87)),
+                SessionOutcome::Compared { fastest, rival } => {
+                    let ours = fastest.map(|(engine, ms)| format!("{} {ms} ms", engine.short_label())).unwrap_or_else(|| "no engine answered".into());
+                    match rival {
+                        RivalOutcome::Landed { ms, .. } => (format!("{ours} · rival {ms} ms"), if fastest.is_some() { egui::Color32::LIGHT_GREEN } else { egui::Color32::from_rgb(255, 166, 87) }),
+                        other => (format!("{ours} · rival {}", other.status()), egui::Color32::from_rgb(255, 166, 87)),
+                    }
+                }
                 SessionOutcome::NothingHeard => ("nothing heard".into(), egui::Color32::from_rgb(255, 166, 87)),
                 SessionOutcome::Failed { reason, salvaged } => (if *salvaged { format!("{reason} — draft copied") } else { reason.clone() }, egui::Color32::from_rgb(255, 166, 87)),
             },
@@ -626,6 +776,21 @@ impl App {
                 });
             },
         );
+    }
+}
+
+/// Runs one contender to its text. Blocking; worker threads only.
+fn hear(hearing: Hearing, engine: Engine, samples: &[f32], tail: &[f32], hints: &TranscriptionHints, support: &Path, models_dir: &Path) -> Result<RawTranscript, String> {
+    match hearing {
+        Hearing::Live(mut live) => {
+            live.feed(tail);
+            live.finish().map_err(|e| e.to_string())
+        }
+        Hearing::Batch(Some(transcriber)) => transcriber.transcribe(samples, hints).map_err(|e| e.to_string()),
+        Hearing::Batch(None) => hearsay_engines::make_engine(engine, &KeyStore::new(support), models_dir)
+            .map_err(|e| e.to_string())?
+            .transcribe(samples, hints)
+            .map_err(|e| e.to_string()),
     }
 }
 

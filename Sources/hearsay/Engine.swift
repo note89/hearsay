@@ -73,6 +73,24 @@ enum Engine: Equatable {
         }
     }
 
+    /// Two or three words: chips, pills and leaderboard rows.
+    var shortLabel: String {
+        switch self {
+        case .appleLocal: return "Apple"
+        case .openRouter(let model): return model.label
+        case .elevenLabsScribe: return "Scribe v2"
+        case .geminiTranscribeLive: return "Gemini Live"
+        }
+    }
+
+    /// Streams text while you speak. In a race the pill shows the first such engine's partials.
+    var deliversPartials: Bool {
+        switch self {
+        case .appleLocal, .geminiTranscribeLive: return true
+        case .openRouter, .elevenLabsScribe: return false
+        }
+    }
+
     /// Only the Apple engine needs a locale; the cloud engines detect language themselves.
     /// Exhaustive on purpose: a new engine must decide this explicitly.
     var needsLocale: Bool {

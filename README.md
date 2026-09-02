@@ -128,13 +128,16 @@ OpenRouter — separate key.
 
 ## The bake-off
 
-Open hearsay… → **Bake-off**, run Wispr Flow alongside, and read the script sentences. Both apps
-hear the same audio from the same key-up; hearsay never inserts while the pane is front — it watches
-the pane's text box for the rival's output and scores both against the on-screen sentence:
-word-level diffs, WER (numeral style, units, ordinals and contractions never count as errors),
-latency on one clock, per-engine scoreboards. Each record stores the sentence it was a take of, so
-retakes can't corrupt a run. `Reset run` archives to
-`~/Library/Application Support/hearsay/bakeoff.jsonl` archives.
+Open hearsay… → **Bake-off**, run Wispr Flow alongside, and read the ten script sentences (English
+with numbers and jargon, one Swedish, two svengelska, one Portuguese). Every engine you tick races
+the same audio from the same key-up, each on its own clock; hearsay never inserts while the pane is
+front — it watches the pane's text box for the rival's output and scores everything against the
+on-screen sentence: word-level diffs, WER (numeral style, units, ordinals and contractions never
+count as errors), latency, a leaderboard, and each engine's record against the rival. Engines are
+scored on their raw text; Style is a separate concept and would only blur the comparison. A take
+stores the sentence it was a take of and every engine's result, failures included — in a benchmark,
+not answering is a loss. `Archive & reset run` moves the run to
+`~/Library/Application Support/hearsay/bakeoff.run-<stamp>.jsonl`.
 
 ## Field context & dictionary
 

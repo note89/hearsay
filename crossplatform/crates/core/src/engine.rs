@@ -7,7 +7,7 @@ pub enum PrivacyClass {
 }
 
 /// whisper.cpp models hearsay knows how to fetch and label. Adding one is one variant + one row.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum WhisperModel {
     BaseEn,
     LargeV3Turbo,
@@ -41,7 +41,7 @@ impl WhisperModel {
 
 /// The general LLMs hearsay will transcribe with via OpenRouter. One at a time: the dedicated ASR
 /// engines are the product, this is the comparison point. Adding one is one variant + one row.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum OpenRouterModel {
     GeminiFlash,
 }
@@ -71,7 +71,7 @@ impl OpenRouterModel {
 /// The engine concept: who turns audio into text, at what cost and privacy. One type owns identity
 /// (wire key), display, availability and privacy. Wire keys are shared with the macOS app so bake-off
 /// records are comparable across platforms.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Engine {
     Whisper(WhisperModel),
     OpenRouter(OpenRouterModel),
@@ -111,6 +111,16 @@ impl Engine {
             Engine::OpenRouter(m) => format!("Google · {} (via OpenRouter)", m.label()),
             Engine::ElevenLabsScribe => "ElevenLabs · Scribe v2".to_string(),
             Engine::GeminiTranscribeLive => "Google · Gemini 3.5 Transcribe (live)".to_string(),
+        }
+    }
+
+    /// Two or three words: chips, pills and leaderboard rows.
+    pub fn short_label(&self) -> String {
+        match self {
+            Engine::Whisper(m) => format!("Whisper {}", m.id()),
+            Engine::OpenRouter(m) => m.label().to_string(),
+            Engine::ElevenLabsScribe => "Scribe v2".to_string(),
+            Engine::GeminiTranscribeLive => "Gemini Live".to_string(),
         }
     }
 

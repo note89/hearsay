@@ -6,9 +6,9 @@ the same concepts, the same data files and the same bake-off lab.
 **New**
 - `hearsay-rs` for Linux and Windows: hold Ctrl+Alt+Space, speak, release, text lands at the caret.
 - whisper.cpp on-device engine (`base.en`, downloaded from the Dictation pane; `large-v3-turbo` selectable).
-- OpenRouter (Gemini 2.5 Flash Lite / Flash) and ElevenLabs Scribe engines, keys via `keys.env` or env vars.
+- Cloud engines: ElevenLabs Scribe v2, Gemini 3.5 Transcribe Live (streaming, partials in the pill), Gemini 3.7 Flash via OpenRouter. Keys via `keys.env` or env vars. Mixed-language dictation (svengelska) works on all three.
 - The five panes — Dictation · Dictionary · Style · Bake-off · History — as an egui window, plus the overlay pill.
-- Bake-off lab scores hearsay against any rival dictation tool on identical audio, same as on Mac.
+- Bake-off lab races every engine you tick on one take and scores each against the rival: leaderboard, per-take rows, failures counted. Ten-sentence script with Swedish, svengelska and Portuguese.
 
 **Known limits on Linux/Windows** (deliberate, see PLAN-CROSSPLATFORM.md)
 - Batch transcription: no live partials.

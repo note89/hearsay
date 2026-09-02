@@ -266,3 +266,46 @@ Each milestone is a working product.
 - Remaining before public release: Developer ID + hardened runtime + notarization (bundle.sh warns), Parakeet engine (one Engine case + FluidAudio), dictionary concept for jargon accuracy.
 - 2026-09-01: bake-off moved into the app (settings window pane); web arena, ArenaBridge and refs sidecar deleted; scorer ported to Swift with a scorer test runner (`swift run bakeoff-tests`).
 - 2026-09-01: round-2 review repairs shipped (P1 behavior + P2 structure); v0.1.1 released.
+
+## Status — 2026-09-02: the race (multi-engine bake-off), both apps
+
+**Purpose.** One reading of each sentence answers two questions at once: which engine is best, and
+does it beat the rival. Before, a run compared one engine; comparing engines meant re-reading the
+script per engine.
+
+**State** (MIRO-checked):
+
+```
+Run   { id, takes: [Take] }
+Take  { id, at, app, expected?, rival: RivalOutcome, results: [EngineResult] }   — results non-empty, engines distinct
+EngineResult { engine, outcome: Scored { spoken, ours, ms } | Failed { reason } }
+```
+
+- The rival is observed once per take, so it lives on the Take, not on each result.
+- An engine that errors or times out is a `Failed` result, kept and shown: in a benchmark a timeout
+  is a loss, not a missing row.
+- Script position = number of takes, not number of rows.
+
+**On disk** (`bakeoff.jsonl`, shared by both apps): still one JSON line per engine result, now with
+a `take` id so rows regroup. `oursStatus: "failed"` + `failure` marks a failed result; absent means
+scored (the pre-race rows). Rows without `take` become one take each. Illegal combinations are
+dropped at decode, as before.
+
+**Actions.** `race(take)` appends every row of a take; `retakeLast` removes the last take whole;
+archive/reset/delete unchanged. Engines to race are a persisted setting (default: all), filtered at
+press to those whose key is present; never empty (falls back to the active engine).
+
+**Session.** `bakeoff(target, expected, runID, takeID, engines)`. One microphone stream is teed to
+every contender; each contender has its own clock from key-up. Contenders are scored on raw engine
+text — the race measures engines, Style is a separate concept and would only blur it (the pane says
+so). Gemini Live still gets `SMART` when Style is on because that is the engine's own behaviour.
+
+**Overlay.** Badge "racing N". Partials come from the first streaming contender (Apple on macOS,
+Gemini Live everywhere). Settled pill: leader's ms vs rival's.
+
+**Summary.** Per engine: scored takes, mean WER, mean ms, failures, and wins/losses/ties against the
+rival on takes both scored. Leaderboard ordered by WER then ms. Verdict names the leader and whether
+it beats the rival.
+
+**Script.** Cut to 10 sentences: the long opener, four dev/number sentences, one Swedish, two
+svengelska, one Portuguese.

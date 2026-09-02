@@ -12,6 +12,9 @@ struct Stored {
     polish: String,
     #[serde(default = "yes")]
     history_enabled: bool,
+    /// Engines left out of a bake-off race, by wire key. Exclusions, so a new engine races by default.
+    #[serde(default)]
+    race_exclusions: Vec<String>,
 }
 
 fn yes() -> bool {
@@ -23,21 +26,36 @@ pub struct Settings {
     pub engine: Engine,
     pub polish: PolishMode,
     pub history_enabled: bool,
+    race_exclusions: Vec<String>,
 }
 
 impl Settings {
     pub fn load(dir: &Path) -> Self {
         let file = dir.join("settings.json");
         let stored: Option<Stored> = fs::read_to_string(&file).ok().and_then(|c| serde_json::from_str(&c).ok());
-        let (engine, polish, history_enabled) = match stored {
+        let (engine, polish, history_enabled, race_exclusions) = match stored {
             Some(s) => (
                 Engine::parse(&s.engine).unwrap_or_else(Engine::default_engine),
                 match s.polish.as_str() { "light" => PolishMode::Light, "full" => PolishMode::Full, _ => PolishMode::Off },
                 s.history_enabled,
+                s.race_exclusions,
             ),
-            None => (Engine::default_engine(), PolishMode::Off, true),
+            None => (Engine::default_engine(), PolishMode::Off, true, Vec::new()),
         };
-        Self { file, engine, polish, history_enabled }
+        Self { file, engine, polish, history_enabled, race_exclusions }
+    }
+
+    pub fn is_racing(&self, engine: Engine) -> bool {
+        !self.race_exclusions.contains(&engine.wire_key())
+    }
+
+    pub fn toggle_racing(&mut self, engine: Engine) {
+        let key = engine.wire_key();
+        match self.race_exclusions.iter().position(|k| *k == key) {
+            Some(index) => { self.race_exclusions.remove(index); }
+            None => self.race_exclusions.push(key),
+        }
+        self.save();
     }
 
     pub fn save(&self) {
@@ -45,6 +63,7 @@ impl Settings {
             engine: self.engine.wire_key(),
             polish: match self.polish { PolishMode::Off => "off", PolishMode::Light => "light", PolishMode::Full => "full" }.to_string(),
             history_enabled: self.history_enabled,
+            race_exclusions: self.race_exclusions.clone(),
         };
         if let Some(dir) = self.file.parent() {
             let _ = fs::create_dir_all(dir);

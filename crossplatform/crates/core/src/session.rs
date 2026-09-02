@@ -101,7 +101,7 @@ pub struct SessionRules {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum SessionPlan {
     Dictate,
-    Bakeoff { expected: Option<String>, run_id: String },
+    Bakeoff { expected: Option<String>, run_id: String, take_id: String, engines: Vec<Engine> },
 }
 
 /// Text bound for the target, with its provenance.

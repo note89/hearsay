@@ -44,26 +44,46 @@ for (r, h) in [("wait 5ms for HTTP/2", "wait five milliseconds for HTTP2"), ("pl
 }
 expect(Scorer.wer(reference: "the cache is stale", hypothesis: "the cache stale") > 0, "deletion still scores")
 
-// RunSummary: aggregation and verdict over records
-let winTake = BakeoffRecord(app: "T", engine: "apple-local", expected: "the cache is stale", spoken: "the cache is stale", ours: "the cache is stale", oursMs: 300, rival: .landed(text: "the cash is stale", latency: .milliseconds(900)))
-let lossTake = BakeoffRecord(app: "T", engine: "apple-local", expected: "send the invoice", spoken: "send the invoice", ours: "send the voice", oursMs: 200, rival: .landed(text: "send the invoice", latency: .milliseconds(700)))
-let unscoredTake = BakeoffRecord(app: "T", engine: "apple-local", expected: "hello there", spoken: "hello there", ours: "hello there", oursMs: 100, rival: .timedOut(after: .seconds(8)))
-let legacyTake = BakeoffRecord(app: "T", engine: "apple-local", expected: nil, spoken: "x", ours: "x", oursMs: 1, rival: .unobservable)
-let summary = RunSummary(records: [winTake, lossTake, unscoredTake, legacyTake])
+// RunSummary: every engine scored per take, leaderboard, record against the rival
+let win = Take(id: "t1", app: "T", expected: "the cache is stale", rival: .landed(text: "the cash is stale", ms: 900), results: [
+    EngineResult(engine: "apple-local", outcome: .scored(spoken: "the cache is stale", ours: "the cache is stale", ms: 300)),
+    EngineResult(engine: "elevenlabs/scribe_v2", outcome: .failed(reason: "timed out")),
+])
+let loss = Take(id: "t2", app: "T", expected: "send the invoice", rival: .landed(text: "send the invoice", ms: 700), results: [
+    EngineResult(engine: "apple-local", outcome: .scored(spoken: "send the invoice", ours: "send the voice", ms: 200)),
+    EngineResult(engine: "elevenlabs/scribe_v2", outcome: .scored(spoken: "send the invoice", ours: "send the invoice", ms: 500)),
+])
+let unscored = Take(id: "t3", app: "T", expected: "hello there", rival: .timedOut, results: [
+    EngineResult(engine: "apple-local", outcome: .scored(spoken: "hello there", ours: "hello there", ms: 100)),
+])
+let legacy = Take(id: "t4", app: "T", expected: nil, rival: .unobservable, results: [
+    EngineResult(engine: "apple-local", outcome: .scored(spoken: "x", ours: "x", ms: 1)),
+])
+let summary = RunSummary(takes: [win, loss, unscored, legacy])
 expect(summary.takes.count == 3, "summary: takes without expected are skipped")
-expect(summary.wins == 1 && summary.losses == 1 && summary.ties == 0, "summary: verdict counts")
-expect(summary.engines.count == 1 && summary.engines[0].takes == 2, "summary: engine group over landed takes only")
-expect(summary.engines[0].meanOursMs == 250 && summary.engines[0].meanRivalMs == 800, "summary: latency means")
+let apple = summary.leaderboard.first { $0.engineKey == "apple-local" }!
+let scribe = summary.leaderboard.first { $0.engineKey == "elevenlabs/scribe_v2" }!
+expect(apple.scored == 3 && apple.failed == 0 && scribe.scored == 1 && scribe.failed == 1, "summary: scored and failed counts per engine")
+expect(apple.wins == 1 && apple.losses == 1 && apple.ties == 0, "summary: record against the rival")
+expect(apple.meanOursMs == 200 && apple.meanRivalMs == 800, "summary: own mean over all scored, rival mean over decided")
+expect(scribe.ties == 1 && scribe.decided == 1, "summary: a perfect tie counts as a tie")
+expect(summary.leaderboard.map(\.engineKey) == ["elevenlabs/scribe_v2", "apple-local"], "summary: leaderboard by WER (scribe 0% on its one take)")
 expect(summary.takes[2].rivalWer == nil, "summary: timed-out rival is unscored")
+expect(summary.takes[0].results.count == 2, "summary: a failed engine is still a row in the take")
 
-// BakeoffRecord: illegal on-disk states are dropped at decode
-let illegal = Data(#"{"at":0,"app":"T","engine":"apple-local","spoken":"x","ours":"x","oursMs":1,"rivalStatus":"landed"}"#.utf8)
-expect((try? JSONDecoder().decode(BakeoffRecord.self, from: illegal)) == nil, "record: landed without text is illegal")
-let roundTrip = try! JSONDecoder().decode(BakeoffRecord.self, from: try! JSONEncoder().encode(winTake))
-expect(roundTrip.rival == .landed(text: "the cash is stale", ms: 900), "record: encode/decode round-trips the union")
+// Codec: rows regroup into takes, legacy rows stand alone, illegal rows are dropped
+let roundTrip = BakeoffCodec.takes(fromJSONL: String(decoding: BakeoffCodec.jsonl(for: win) + BakeoffCodec.jsonl(for: loss), as: UTF8.self))
+expect(roundTrip == [win, loss], "codec: takes round-trip through jsonl, rows regrouped by take id")
+let legacyLine = #"{"at":1000,"app":"T","engine":"apple-local","expected":"a","spoken":"a","ours":"a","oursMs":1,"rivalStatus":"landed","rival":"b","rivalMs":5}"#
+let legacyTakes = BakeoffCodec.takes(fromJSONL: legacyLine + "\n" + legacyLine.replacingOccurrences(of: "1000", with: "2000"))
+expect(legacyTakes.count == 2 && legacyTakes[0].results.count == 1 && legacyTakes[0].rival == .landed(text: "b", ms: 5), "codec: pre-race rows become one take each")
+let illegal = #"{"at":0,"app":"T","engine":"apple-local","spoken":"x","ours":"x","oursMs":1,"rivalStatus":"landed"}"#
+expect(BakeoffCodec.takes(fromJSONL: illegal).isEmpty, "codec: landed without text is illegal")
+let halfFailed = #"{"at":0,"take":"z","app":"T","engine":"e","oursStatus":"failed","spoken":"x","rivalStatus":"timedOut"}"#
+expect(BakeoffCodec.takes(fromJSONL: halfFailed).isEmpty, "codec: failed with spoken text is illegal")
 
 if failures > 0 {
     print("\(failures) failing")
     exit(1)
 }
-print("all scorer tests pass")
+print("all bake-off tests pass")
