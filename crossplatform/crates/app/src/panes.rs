@@ -58,24 +58,60 @@ pub fn dictation(app: &mut App, ui: &mut egui::Ui) {
     ui.add_space(8.0);
     match app.engine_status {
         EngineStatus::MissingModel => {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("This model is not downloaded yet.").color(egui::Color32::from_rgb(255, 166, 87)));
-                if ui.button("Download model").clicked() {
-                    app.download_model();
-                }
+            card(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("This model is not on this machine yet.").color(egui::Color32::from_rgb(255, 166, 87)));
+                    if ui.button("Download model").clicked() {
+                        app.download_model();
+                    }
+                });
+                ui.label(egui::RichText::new("Which one: base.en (150 MB) for English on any CPU. large-v3-turbo (1.6 GB) for Swedish, mixed languages, or the best accuracy — fine on a strong CPU, fast with a GPU build (cargo --features cuda / vulkan / metal).").small().weak());
             });
         }
-        EngineStatus::Downloading => { ui.label("downloading model… (one-time, hundreds of MB)"); }
+        EngineStatus::Downloading => {
+            let (received, total) = app.download_progress.megabytes();
+            ui.label(if total > 0 { format!("downloading model… {received} / {total} MB") } else { "downloading model…".to_string() });
+        }
         EngineStatus::Loading => { ui.label("loading engine…"); }
         EngineStatus::Failed => { ui.label(egui::RichText::new(format!("engine failed: {}", app.engine_error)).color(egui::Color32::from_rgb(255, 123, 114))); }
         EngineStatus::Ready => { ui.label(egui::RichText::new("engine ready").color(egui::Color32::LIGHT_GREEN)); }
     }
     ui.add_space(12.0);
     ui.label(egui::RichText::new("API KEYS").small().strong());
-    ui.label(egui::RichText::new(format!("Cloud engines read OPENROUTER_API_KEY / ELEVEN_LABS_API_KEY / GEMINI_API_KEY from the environment or from {keys_file}")).small().weak());
-    if ui.button("Create keys file").clicked() {
-        app.keys.ensure_file();
+    ui.label(egui::RichText::new("Only for the cloud engines. Read from the environment, keys.env, or your shell profile; or paste one here.").small().weak());
+    let keys_id = ui.id().with("api-keys");
+    let mut saved_now: Option<&'static str> = None;
+    for (name, purpose) in [("OPENROUTER_API_KEY", "Gemini 3.7 Flash, cloud cleanup"), ("GEMINI_API_KEY", "Gemini 3.5 Transcribe Live"), ("ELEVEN_LABS_API_KEY", "Scribe v2")] {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(name).monospace().small());
+            ui.label(egui::RichText::new(purpose).small().weak());
+            match app.keys.source(name) {
+                Some(source) => {
+                    ui.label(egui::RichText::new(source.label()).small().color(egui::Color32::LIGHT_GREEN));
+                }
+                None => {
+                    let draft_id = keys_id.with(name);
+                    let mut draft = ui.memory(|m| m.data.get_temp::<String>(draft_id).unwrap_or_default());
+                    ui.add(egui::TextEdit::singleline(&mut draft).password(true).hint_text("paste key").desired_width(220.0));
+                    if ui.add_enabled(!draft.trim().is_empty(), egui::Button::new("Save")).clicked() {
+                        match app.keys.set(name, draft.trim()) {
+                            Ok(()) => {
+                                draft.clear();
+                                saved_now = Some(name);
+                            }
+                            Err(e) => log::error!("keys: could not write {}: {e}", keys_file),
+                        }
+                    }
+                    ui.memory_mut(|m| m.data.insert_temp(draft_id, draft));
+                }
+            }
+        });
     }
+    if let Some(name) = saved_now {
+        log::info!("keys: {name} saved to keys.env");
+        app.activate_engine();
+    }
+    ui.label(egui::RichText::new(format!("Stored in {keys_file} (readable only by you).")).small().weak());
     if let Some(error) = &app.gesture_error {
         ui.add_space(12.0);
         ui.label(egui::RichText::new(format!("Hotkey could not be registered: {error}")).color(egui::Color32::from_rgb(255, 123, 114)));
@@ -155,11 +191,14 @@ pub fn style(app: &mut App, ui: &mut egui::Ui) {
             ui.add_enabled_ui(enabled, |ui| {
                 let frame = egui::Frame::group(ui.style()).corner_radius(10.0).inner_margin(12.0).stroke(if selected { egui::Stroke::new(1.5_f32, egui::Color32::LIGHT_BLUE) } else { ui.style().visuals.widgets.noninteractive.bg_stroke });
                 let response = frame.show(ui, |ui| {
-                    ui.set_width(200.0);
-                    ui.label(egui::RichText::new(title).strong());
-                    ui.label(egui::RichText::new(blurb).small().weak());
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new(example).small().italics());
+                    // The parent row is horizontal; the card's own contents stack.
+                    ui.vertical(|ui| {
+                        ui.set_width(200.0);
+                        ui.label(egui::RichText::new(title).strong());
+                        ui.label(egui::RichText::new(blurb).small().weak());
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new(example).small().italics());
+                    });
                 });
                 if response.response.interact(egui::Sense::click()).clicked() {
                     chosen = mode;
@@ -328,9 +367,30 @@ pub fn history(app: &mut App, ui: &mut egui::Ui) {
     if let Some(text) = copy { app.copy_text(&text); }
 }
 
+/// Unix seconds → "YYYY-MM-DD HH:MM UTC". Civil-from-days after Howard Hinnant; no calendar crate needed.
 fn timestamp(secs: f64) -> String {
-    let s = secs as u64;
-    let (h, m) = ((s / 3600) % 24, (s / 60) % 60);
-    let days = s / 86400;
-    format!("day {days} {h:02}:{m:02} UTC")
+    let s = secs.max(0.0) as i64;
+    let (hours, minutes) = ((s / 3600) % 24, (s / 60) % 60);
+    let z = s.div_euclid(86_400) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + if month <= 2 { 1 } else { 0 };
+    format!("{year:04}-{month:02}-{day:02} {hours:02}:{minutes:02} UTC")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::timestamp;
+
+    #[test]
+    fn timestamps_are_civil_dates() {
+        assert_eq!(timestamp(0.0), "1970-01-01 00:00 UTC");
+        assert_eq!(timestamp(951_782_400.0), "2000-02-29 00:00 UTC");
+        assert_eq!(timestamp(1_788_700_000.0), "2026-09-06 13:06 UTC");
+    }
 }

@@ -8,6 +8,7 @@ use hearsay_backends::audio::Recording;
 use hearsay_backends::hotkey::{GestureEvent, HoldGestureMonitor};
 use hearsay_backends::insert::PasteInserter;
 use hearsay_core::bakeoff::{BakeoffStore, EngineOutcome, EngineResult, RivalOutcome, Take, SCRIPT};
+use hearsay_core::engine::DownloadProgress;
 use hearsay_core::session::Transcriber;
 use std::collections::HashMap;
 use std::path::Path;
@@ -161,6 +162,7 @@ pub struct App {
     engine_handle: Option<EngineHandle>,
     /// Engines built for races beyond the active one. Cloud engines are cheap to build and cached here.
     engine_handles: HashMap<Engine, EngineHandle>,
+    pub download_progress: Arc<DownloadProgress>,
     polisher: Option<Arc<dyn Polisher>>,
     pending_take: Option<PendingTake>,
     worker_tx: Sender<WorkerMessage>,
@@ -217,6 +219,7 @@ impl App {
             inserter: Arc::new(PasteInserter::new()),
             engine_handle: None,
             engine_handles: HashMap::new(),
+            download_progress: Arc::new(DownloadProgress::default()),
             pending_take: None,
             worker_tx,
             worker_rx,
@@ -255,11 +258,13 @@ impl App {
         self.engine_status = EngineStatus::Downloading;
         let dir = self.models_dir.clone();
         let tx = self.worker_tx.clone();
+        self.download_progress = Arc::new(DownloadProgress::default());
+        let progress = self.download_progress.clone();
         std::thread::spawn(move || {
             #[cfg(feature = "local-stt")]
-            let result = hearsay_engines::whisper::download_model(model, &dir);
+            let result = hearsay_engines::whisper::download_model(model, &dir, &progress);
             #[cfg(not(feature = "local-stt"))]
-            let result = { let _ = (model, dir); Err("built without local-stt".to_string()) };
+            let result = { let _ = (model, dir, progress); Err("built without local-stt".to_string()) };
             let _ = tx.send(WorkerMessage::Downloaded(result));
         });
     }
@@ -286,7 +291,10 @@ impl App {
         match self.engine_status {
             EngineStatus::Loading => "loading engine…".into(),
             EngineStatus::MissingModel => "model not downloaded — Dictation pane".into(),
-            EngineStatus::Downloading => "downloading model…".into(),
+            EngineStatus::Downloading => {
+                let (received, total) = self.download_progress.megabytes();
+                if total > 0 { format!("downloading model… {received} / {total} MB") } else { "downloading model…".into() }
+            }
             EngineStatus::Failed => format!("engine failed: {}", self.engine_error),
             EngineStatus::Ready => match &self.phase {
                 Phase::Idle | Phase::Settled(..) => if self.bakeoff_pane_visible { "bake-off pane open — dictating into it scores".into() } else { "hold Ctrl+Alt+Space to dictate".into() },

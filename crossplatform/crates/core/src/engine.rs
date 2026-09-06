@@ -68,6 +68,21 @@ impl OpenRouterModel {
     }
 }
 
+/// A model download in flight: bytes so far and the total, for the pane. Total is zero until the
+/// server has answered.
+#[derive(Default)]
+pub struct DownloadProgress {
+    pub received: std::sync::atomic::AtomicU64,
+    pub total: std::sync::atomic::AtomicU64,
+}
+
+impl DownloadProgress {
+    pub fn megabytes(&self) -> (u64, u64) {
+        use std::sync::atomic::Ordering::Relaxed;
+        (self.received.load(Relaxed) / 1_048_576, self.total.load(Relaxed) / 1_048_576)
+    }
+}
+
 /// The engine concept: who turns audio into text, at what cost and privacy. One type owns identity
 /// (wire key), display, availability and privacy. Wire keys are shared with the macOS app so bake-off
 /// records are comparable across platforms.

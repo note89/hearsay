@@ -12,6 +12,9 @@ path = "src/main.rs"
 [features]
 default = ["local-stt"]
 local-stt = ["hearsay-engines/local-stt"]
+cuda = ["hearsay-engines/cuda"]
+vulkan = ["hearsay-engines/vulkan"]
+metal = ["hearsay-engines/metal"]
 
 [dependencies]
 hearsay-core = { path = "../core" }

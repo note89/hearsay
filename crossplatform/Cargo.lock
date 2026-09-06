@@ -1843,7 +1843,7 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "hearsay-backends"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arboard",
  "cpal",
@@ -1858,7 +1858,7 @@ dependencies = [
 
 [[package]]
 name = "hearsay-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "directories",
  "regex",
@@ -1870,7 +1870,7 @@ dependencies = [
 
 [[package]]
 name = "hearsay-engines"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "hearsay-core",
  "log",
@@ -1883,7 +1883,7 @@ dependencies = [
 
 [[package]]
 name = "hearsay-rs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui",
@@ -4944,6 +4944,7 @@ version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d2eac0a371f8ae667a5ee15ae4130553ea3004e7572544d1ce546c81ea8874b"
 dependencies = [
+ "libc",
  "whisper-rs-sys",
 ]
 

@@ -1,4 +1,4 @@
-use hearsay_core::engine::WhisperModel;
+use hearsay_core::engine::{DownloadProgress, WhisperModel};
 use hearsay_core::session::{RawTranscript, TranscriptionFailure, TranscriptionHints, Transcriber};
 use std::path::Path;
 use std::sync::Mutex;
@@ -51,20 +51,31 @@ impl Transcriber for WhisperTranscriber {
 }
 
 /// Fetches a model into the models directory. Blocking; the app runs it on a thread.
-pub fn download_model(model: WhisperModel, models_dir: &Path) -> Result<(), String> {
+pub fn download_model(model: WhisperModel, models_dir: &Path, progress: &DownloadProgress) -> Result<(), String> {
+    use std::io::{Read, Write};
+    use std::sync::atomic::Ordering::Relaxed;
     std::fs::create_dir_all(models_dir).map_err(|e| e.to_string())?;
     let target = models_dir.join(model.file_name());
     let partial = models_dir.join(format!("{}.partial", model.file_name()));
-    let bytes = reqwest::blocking::Client::builder()
+    let mut response = reqwest::blocking::Client::builder()
         .timeout(None)
         .build()
         .map_err(|e| e.to_string())?
         .get(model.download_url())
         .send()
         .and_then(|r| r.error_for_status())
-        .map_err(|e| e.to_string())?
-        .bytes()
         .map_err(|e| e.to_string())?;
-    std::fs::write(&partial, &bytes).map_err(|e| e.to_string())?;
+    progress.total.store(response.content_length().unwrap_or(0), Relaxed);
+    let mut file = std::fs::File::create(&partial).map_err(|e| e.to_string())?;
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let n = response.read(&mut buffer).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buffer[..n]).map_err(|e| e.to_string())?;
+        progress.received.fetch_add(n as u64, Relaxed);
+    }
+    drop(file);
     std::fs::rename(&partial, &target).map_err(|e| e.to_string())
 }

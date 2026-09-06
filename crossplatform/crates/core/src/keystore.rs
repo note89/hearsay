@@ -3,9 +3,35 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// API keys for the optional cloud engines: process environment first, then `keys.env` in the
-/// support directory. Values are never logged.
+/// support directory, then the shell profiles. Values are never logged.
 pub struct KeyStore {
     file: PathBuf,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum KeySource {
+    Environment,
+    KeysFile,
+    ShellProfile(PathBuf),
+}
+
+impl KeySource {
+    pub fn label(&self) -> String {
+        match self {
+            KeySource::Environment => "found in the environment".into(),
+            KeySource::KeysFile => "saved in keys.env".into(),
+            KeySource::ShellProfile(path) => format!("found in {}", path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()),
+        }
+    }
+}
+
+/// The files people `export` keys in. None on Windows, where user variables are already in the environment.
+fn shell_profiles() -> Vec<PathBuf> {
+    if cfg!(windows) {
+        return Vec::new();
+    }
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return Vec::new() };
+    [".zshrc", ".zprofile", ".bashrc", ".bash_profile", ".profile"].iter().map(|name| home.join(name)).collect()
 }
 
 impl KeyStore {
@@ -18,13 +44,51 @@ impl KeyStore {
     }
 
     pub fn value(&self, name: &str) -> Option<String> {
+        self.lookup(name).map(|(value, _)| value)
+    }
+
+    /// Where a key was found, for the pane. Never the value.
+    pub fn source(&self, name: &str) -> Option<KeySource> {
+        self.lookup(name).map(|(_, source)| source)
+    }
+
+    /// Process environment, then `keys.env`, then the shell profiles most people export keys in.
+    fn lookup(&self, name: &str) -> Option<(String, KeySource)> {
         if let Ok(env) = std::env::var(name) {
             if !env.is_empty() {
-                return Some(env);
+                return Some((env, KeySource::Environment));
             }
         }
-        let content = fs::read_to_string(&self.file).ok()?;
-        parse_env(&content).remove(name)
+        if let Some(value) = fs::read_to_string(&self.file).ok().and_then(|c| parse_env(&c).remove(name)) {
+            return Some((value, KeySource::KeysFile));
+        }
+        for profile in shell_profiles() {
+            if let Some(value) = fs::read_to_string(&profile).ok().and_then(|c| parse_env(&c).remove(name)) {
+                return Some((value, KeySource::ShellProfile(profile)));
+            }
+        }
+        None
+    }
+
+    /// Writes `NAME=value` into `keys.env` (0600), replacing an existing line for that name.
+    pub fn set(&self, name: &str, value: &str) -> std::io::Result<()> {
+        if let Some(dir) = self.file.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        let existing = fs::read_to_string(&self.file).unwrap_or_else(|_| TEMPLATE.to_string());
+        let mut lines: Vec<String> = existing.lines().map(str::to_string).collect();
+        let is_this_key = |line: &str| {
+            let line = line.trim();
+            let line = line.strip_prefix("export ").unwrap_or(line);
+            line.split('=').next().map(str::trim) == Some(name)
+        };
+        match lines.iter().position(|l| is_this_key(l)) {
+            Some(index) => lines[index] = format!("{name}={value}"),
+            None => lines.push(format!("{name}={value}")),
+        }
+        fs::write(&self.file, lines.join("\n") + "\n")?;
+        restrict_permissions(&self.file);
+        Ok(())
     }
 
     /// Creates the file with a commented template when missing, so "API Keys…" always opens something editable.
@@ -43,10 +107,13 @@ impl KeyStore {
 const TEMPLATE: &str = "# hearsay API keys — needed only for the optional cloud engines.\n\
 # The default engine runs on this machine and uses no key and no network.\n\
 \n\
-# https://openrouter.ai/keys — unlocks the Gemini engines and cloud polish:\n\
+# https://openrouter.ai/keys — unlocks Gemini 3.7 Flash and cloud cleanup:\n\
 OPENROUTER_API_KEY=\n\
 \n\
-# https://elevenlabs.io — unlocks ElevenLabs Scribe:\n\
+# https://aistudio.google.com/apikey — unlocks Gemini 3.5 Transcribe Live:\n\
+GEMINI_API_KEY=\n\
+\n\
+# https://elevenlabs.io — unlocks ElevenLabs Scribe v2:\n\
 ELEVEN_LABS_API_KEY=\n";
 
 /// `NAME=value` lines; `export` prefix, quotes and trailing comments tolerated; exact-name match only.

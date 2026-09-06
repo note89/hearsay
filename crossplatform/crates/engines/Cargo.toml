@@ -9,6 +9,10 @@ description = "Transcriber and Polisher implementations: whisper.cpp (local), Ge
 default = ["local-stt"]
 # whisper.cpp builds C++ via cmake; off for cross-compile checks without a target toolchain.
 local-stt = ["dep:whisper-rs"]
+# GPU back ends for whisper.cpp, for people building from source with the toolkit installed.
+cuda = ["whisper-rs/cuda"]
+vulkan = ["whisper-rs/vulkan"]
+metal = ["whisper-rs/metal"]
 
 [dependencies]
 hearsay-core = { path = "../core" }
