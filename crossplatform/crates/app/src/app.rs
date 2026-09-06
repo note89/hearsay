@@ -189,8 +189,14 @@ impl App {
         let (worker_tx, worker_rx) = channel();
         let hotkey = HoldGestureMonitor::new(HoldGestureMonitor::default_chord());
         let (hotkey, gesture_error) = match hotkey {
-            Ok(h) => (Some(h), None),
-            Err(e) => (None, Some(e.to_string())),
+            Ok(h) => {
+                log::info!("hotkey: Ctrl+Alt+Space via {}", h.source_label());
+                (Some(h), None)
+            }
+            Err(e) => {
+                log::error!("hotkey: {e}");
+                (None, Some(e.to_string()))
+            }
         };
         let mut app = Self {
             section: Section::Dictation,
@@ -266,6 +272,11 @@ impl App {
 
     pub fn active_engine(&self) -> Engine {
         self.settings.engine
+    }
+
+    /// Where the chord is heard, or `None` when no source could be opened.
+    pub fn hotkey_source(&self) -> Option<&'static str> {
+        self.hotkey.as_ref().map(HoldGestureMonitor::source_label)
     }
 
     pub fn status_line(&self) -> String {
@@ -720,7 +731,7 @@ impl App {
             Phase::Settled(outcome, _) => match outcome {
                 SessionOutcome::Landed { outcome: InsertionOutcome::Inserted { evidence: InsertionEvidence::Verified }, total_ms, .. } => (format!("inserted · {total_ms} ms"), egui::Color32::LIGHT_GREEN),
                 SessionOutcome::Landed { outcome: InsertionOutcome::Inserted { evidence: InsertionEvidence::Posted }, total_ms, .. } => (format!("sent · {total_ms} ms"), egui::Color32::LIGHT_GREEN),
-                SessionOutcome::Landed { outcome: InsertionOutcome::CopiedToClipboard(_), .. } => ("copied — could not insert".into(), egui::Color32::from_rgb(255, 166, 87)),
+                SessionOutcome::Landed { outcome: InsertionOutcome::CopiedToClipboard(block), .. } => (copied_message(*block).into(), egui::Color32::from_rgb(255, 166, 87)),
                 SessionOutcome::Compared { fastest, rival } => {
                     let ours = fastest.map(|(engine, ms)| format!("{} {ms} ms", engine.short_label())).unwrap_or_else(|| "no engine answered".into());
                     match rival {
@@ -776,6 +787,15 @@ impl App {
                 });
             },
         );
+    }
+}
+
+fn copied_message(block: InsertionBlock) -> &'static str {
+    match block {
+        InsertionBlock::InjectionUnavailable => "copied — press Ctrl+V to paste",
+        InsertionBlock::AllStrategiesFailed => "copied — could not insert",
+        InsertionBlock::NoFrontmostApp => "copied",
+        InsertionBlock::TargetLost => "copied — focus moved",
     }
 }
 

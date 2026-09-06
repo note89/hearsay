@@ -1,3 +1,4 @@
+use crate::DisplayServer;
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use hearsay_core::session::{InsertionBlock, InsertionEvidence, InsertionOutcome, Inserter};
 use std::thread;
@@ -38,6 +39,12 @@ impl Inserter for PasteInserter {
         let previous = clipboard.get_text().ok();
         if clipboard.set_text(text).is_err() {
             return InsertionOutcome::CopiedToClipboard(InsertionBlock::AllStrategiesFailed);
+        }
+        if DisplayServer::current() == DisplayServer::Wayland {
+            // Native Wayland windows ignore injected keystrokes; XWayland windows still take the
+            // paste. Best effort, clipboard kept for a manual Ctrl+V, and the pill says so.
+            let _ = self.paste_keystroke();
+            return InsertionOutcome::CopiedToClipboard(InsertionBlock::InjectionUnavailable);
         }
         if !self.paste_keystroke() {
             return InsertionOutcome::CopiedToClipboard(InsertionBlock::AllStrategiesFailed);

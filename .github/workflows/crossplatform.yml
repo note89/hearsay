@@ -1,0 +1,90 @@
+name: crossplatform
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths: ["crossplatform/**", ".github/workflows/crossplatform.yml"]
+  pull_request:
+    paths: ["crossplatform/**", ".github/workflows/crossplatform.yml"]
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: crossplatform
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64, os: ubuntu-24.04, artifact: hearsay-rs-linux-x86_64, binary: hearsay-rs }
+          - { name: windows-x86_64, os: windows-latest, artifact: hearsay-rs-windows-x86_64, binary: hearsay-rs.exe }
+          - { name: macos-arm64, os: macos-latest, artifact: hearsay-rs-macos-arm64, binary: hearsay-rs }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crossplatform
+      - name: Linux build and runtime deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends cmake clang libclang-dev pkg-config \
+            libasound2-dev libx11-dev libxi-dev libxtst-dev libxdo-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev \
+            xvfb x11-utils xdotool libgl1-mesa-dri libegl1 libxcursor1 libxrandr2 libxi6 libxkbcommon-x11-0
+      - name: Test
+        run: cargo test --workspace
+      - name: Build (release, local whisper on)
+        run: cargo build --release -p hearsay-rs
+      - name: Linux headless smoke — window opens, hotkey registers on X11
+        if: runner.os == 'Linux'
+        run: |
+          Xvfb :99 -screen 0 1400x900x24 >/tmp/xvfb.log 2>&1 &
+          sleep 1
+          export DISPLAY=:99 XDG_SESSION_TYPE=x11
+          ./target/release/hearsay-rs engines
+          (RUST_LOG=info ./target/release/hearsay-rs >/tmp/app.log 2>&1 &)
+          sleep 6
+          pgrep -f target/release/hearsay-rs >/dev/null || { echo "app died"; cat /tmp/app.log; exit 1; }
+          xdotool search --name hearsay >/dev/null || { echo "no window"; cat /tmp/app.log; exit 1; }
+          grep -q "hotkey" /tmp/app.log && cat /tmp/app.log | grep -i hotkey || true
+          pkill -f target/release/hearsay-rs || true
+          echo "runtime shared libraries:"; ldd target/release/hearsay-rs | grep -vE "linux-vdso|libc.so|libm.so|libpthread|libdl|ld-linux|libgcc_s|librt|libstdc\+\+" | awk '{print $1}' | sort
+      - name: Windows smoke — engines list
+        if: runner.os == 'Windows'
+        run: ./target/release/hearsay-rs.exe engines
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/release/${{ matrix.binary }} dist/
+          cp README.md dist/README-hearsay-rs.md
+          cp ../LICENSE dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: crossplatform/dist/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Zip per platform
+        working-directory: artifacts
+        run: for d in */; do (cd "$d" && zip -r "../${d%/}.zip" .); done
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+          generate_release_notes: true

@@ -115,3 +115,21 @@ fall back to the default engine, archived bake-off rows keep their strings.
 **The race (2026-09-02).** Multi-engine bake-off, designed in PLAN.md ("the race"). Rust: one worker thread per
 contender, live contenders fed from the UI loop each frame, `PendingTake` completes when every contender
 reported and the rival was observed; `Take::from_jsonl` / `to_jsonl` share the flat row format with the Mac app.
+
+## Addendum 2026-09-06 — Wayland, and proof before a stranger runs it
+
+Ubuntu and Fedora default to Wayland, which has no global hotkey and accepts no injected keystrokes
+for native windows. Two mechanisms change there; the concepts do not.
+
+- **utterance** — `DisplayServer::current()` (X11 / Wayland / System, one fact both backends consult).
+  On Wayland the chord is read from the keyboard devices under `/dev/input` (`evdev`, non-blocking,
+  polled by the UI loop) instead of registered with the window system. Needs the `input` group; the
+  error says so. On X11 nothing changes.
+- **insertion** — on Wayland the paste keystroke is best effort (XWayland windows take it), the
+  clipboard is never restored, and the outcome is `CopiedToClipboard(InjectionUnavailable)`: the pill
+  says "copied — press Ctrl+V". Honest evidence beats a "sent" that landed nowhere.
+
+Verification now runs on real machines: `.github/workflows/crossplatform.yml` builds and tests on
+Ubuntu x86_64, Windows and macOS on every push, runs the window under Xvfb on Linux (window opens,
+hotkey source logged), lists the runtime shared libraries, and uploads binaries; tags publish a
+release. Locally the same Xvfb smoke runs in Docker.

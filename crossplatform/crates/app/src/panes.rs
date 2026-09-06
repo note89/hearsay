@@ -5,6 +5,7 @@ use hearsay_core::bakeoff::{RivalOutcome, RunSummary, ScoredOutcome, SCRIPT};
 use hearsay_core::engine::{Engine, PrivacyClass};
 use hearsay_core::lexicon::{self, LexiconEntry};
 use hearsay_core::scorer::{self, DiffVerdict};
+use hearsay_backends::DisplayServer;
 use hearsay_core::session::PolishMode;
 
 fn header(ui: &mut egui::Ui, title: &str, subtitle: &str) {
@@ -19,7 +20,14 @@ fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
 }
 
 pub fn dictation(app: &mut App, ui: &mut egui::Ui) {
-    header(ui, "Dictation", "Hold Ctrl+Alt+Space anywhere. Release, and the words land at your cursor.");
+    let subtitle = match DisplayServer::current() {
+        DisplayServer::Wayland => "Hold Ctrl+Alt+Space anywhere. Release, and the text is on your clipboard — Wayland takes no injected keystrokes, so press Ctrl+V.",
+        DisplayServer::X11 | DisplayServer::System => "Hold Ctrl+Alt+Space anywhere. Release, and the words land at your cursor.",
+    };
+    header(ui, "Dictation", subtitle);
+    if let Some(source) = app.hotkey_source() {
+        ui.label(egui::RichText::new(format!("chord heard via {source}")).small().weak());
+    }
     let keys_file = app.keys.file_path().display().to_string();
     let engines = Engine::all();
     let chosen = app.settings.engine;

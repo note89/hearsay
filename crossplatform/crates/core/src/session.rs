@@ -144,6 +144,9 @@ pub enum InsertionBlock {
     AllStrategiesFailed,
     NoFrontmostApp,
     TargetLost,
+    /// The display server takes no injected keystrokes for native windows (Wayland): the text is on
+    /// the clipboard for a manual paste.
+    InjectionUnavailable,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

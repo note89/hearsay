@@ -13,3 +13,8 @@ enigo.workspace = true
 arboard.workspace = true
 log.workspace = true
 thiserror.workspace = true
+
+# Wayland compositors expose no global hotkey; on Linux the chord can be read from the keyboard devices.
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev = "0.13"
+libc = "0.2"
