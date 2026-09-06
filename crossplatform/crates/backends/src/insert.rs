@@ -1,4 +1,4 @@
-use crate::DisplayServer;
+use crate::{DisplayServer, KeystrokeInjection};
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use hearsay_core::session::{InsertionBlock, InsertionEvidence, InsertionOutcome, Inserter};
 use std::thread;
@@ -16,12 +16,12 @@ impl PasteInserter {
         Self
     }
 
-    fn paste_keystroke(&self) -> bool {
-        let Ok(mut enigo) = Enigo::new(&Settings::default()) else { return false };
+    fn paste_keystroke(&self) -> Result<(), String> {
+        let mut enigo = Enigo::new(&Settings::default()).map_err(|e| format!("no input connection: {e}"))?;
         let modifier = if cfg!(target_os = "macos") { Key::Meta } else { Key::Control };
-        enigo.key(modifier, Direction::Press).is_ok()
-            && enigo.key(Key::Unicode('v'), Direction::Click).is_ok()
-            && enigo.key(modifier, Direction::Release).is_ok()
+        enigo.key(modifier, Direction::Press).map_err(|e| e.to_string())?;
+        enigo.key(Key::Unicode('v'), Direction::Click).map_err(|e| e.to_string())?;
+        enigo.key(modifier, Direction::Release).map_err(|e| e.to_string())
     }
 }
 
@@ -33,21 +33,27 @@ impl Default for PasteInserter {
 
 impl Inserter for PasteInserter {
     fn insert(&self, text: &str) -> InsertionOutcome {
-        let Ok(mut clipboard) = arboard::Clipboard::new() else {
-            return InsertionOutcome::CopiedToClipboard(InsertionBlock::AllStrategiesFailed);
+        let mut clipboard = match arboard::Clipboard::new() {
+            Ok(clipboard) => clipboard,
+            Err(e) => {
+                log::warn!("insert: clipboard unavailable: {e}");
+                return InsertionOutcome::Lost;
+            }
         };
         let previous = clipboard.get_text().ok();
-        if clipboard.set_text(text).is_err() {
-            return InsertionOutcome::CopiedToClipboard(InsertionBlock::AllStrategiesFailed);
+        if let Err(e) = clipboard.set_text(text) {
+            log::warn!("insert: clipboard write failed: {e}");
+            return InsertionOutcome::Lost;
         }
-        if DisplayServer::current() == DisplayServer::Wayland {
-            // Native Wayland windows ignore injected keystrokes; XWayland windows still take the
-            // paste. Best effort, clipboard kept for a manual Ctrl+V, and the pill says so.
+        if DisplayServer::current() == DisplayServer::Wayland && KeystrokeInjection::probe() == KeystrokeInjection::Refused {
+            // GNOME and friends: native windows ignore injected keystrokes, XWayland windows still
+            // take the paste. Best effort, clipboard kept for a manual Ctrl+V, and the pill says so.
             let _ = self.paste_keystroke();
             return InsertionOutcome::CopiedToClipboard(InsertionBlock::InjectionUnavailable);
         }
-        if !self.paste_keystroke() {
-            return InsertionOutcome::CopiedToClipboard(InsertionBlock::AllStrategiesFailed);
+        if let Err(e) = self.paste_keystroke() {
+            log::warn!("insert: paste keystroke failed: {e}");
+            return InsertionOutcome::CopiedToClipboard(InsertionBlock::KeystrokeFailed);
         }
         thread::sleep(SETTLE);
         if let Some(previous) = previous {

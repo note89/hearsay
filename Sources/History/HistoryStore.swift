@@ -6,6 +6,8 @@ public enum RecordedOutcome: String, Codable, Sendable {
     case inserted
     case copiedToClipboard
     case targetLost
+    /// Written by the Linux/Windows app when neither insertion nor the clipboard was reachable.
+    case lost
 }
 
 public struct DictationRecord: Identifiable, Codable, Equatable, Sendable {

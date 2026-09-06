@@ -183,7 +183,8 @@ const RIVAL_GRACE: Duration = Duration::from_millis(400);
 const FINISH_TIMEOUT: Duration = Duration::from_secs(20);
 
 impl App {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        install_fonts(&cc.egui_ctx);
         let dir = support_dir();
         let _ = std::fs::create_dir_all(&dir);
         let settings = Settings::load(&dir);
@@ -537,11 +538,12 @@ impl App {
                 let insert_ms = started.elapsed().as_millis() as u64;
                 self.last_timing = Some((ms, insert_ms));
                 log::info!("session: ready {ms} ms · insert {insert_ms} ms · {outcome:?}");
-                if self.settings.history_enabled {
+                if self.settings.history_enabled || outcome == InsertionOutcome::Lost {
                     let recorded = match outcome {
                         InsertionOutcome::Inserted { .. } => RecordedOutcome::Inserted,
                         InsertionOutcome::CopiedToClipboard(InsertionBlock::TargetLost) => RecordedOutcome::TargetLost,
                         InsertionOutcome::CopiedToClipboard(_) => RecordedOutcome::CopiedToClipboard,
+                        InsertionOutcome::Lost => RecordedOutcome::Lost,
                     };
                     self.history.record(DictationRecord::new(text.spoken(), text.text(), "—", recorded));
                 }
@@ -740,6 +742,7 @@ impl App {
                 SessionOutcome::Landed { outcome: InsertionOutcome::Inserted { evidence: InsertionEvidence::Verified }, total_ms, .. } => (format!("inserted · {total_ms} ms"), egui::Color32::LIGHT_GREEN),
                 SessionOutcome::Landed { outcome: InsertionOutcome::Inserted { evidence: InsertionEvidence::Posted }, total_ms, .. } => (format!("sent · {total_ms} ms"), egui::Color32::LIGHT_GREEN),
                 SessionOutcome::Landed { outcome: InsertionOutcome::CopiedToClipboard(block), .. } => (copied_message(*block).into(), egui::Color32::from_rgb(255, 166, 87)),
+                SessionOutcome::Landed { outcome: InsertionOutcome::Lost, .. } => ("nothing landed — the text is in History".into(), egui::Color32::from_rgb(255, 123, 114)),
                 SessionOutcome::Compared { fastest, rival } => {
                     let ours = fastest.map(|(engine, ms)| format!("{} {ms} ms", engine.short_label())).unwrap_or_else(|| "no engine answered".into());
                     match rival {
@@ -801,7 +804,7 @@ impl App {
 fn copied_message(block: InsertionBlock) -> &'static str {
     match block {
         InsertionBlock::InjectionUnavailable => "copied — press Ctrl+V to paste",
-        InsertionBlock::AllStrategiesFailed => "copied — could not insert",
+        InsertionBlock::KeystrokeFailed => "copied — could not paste",
         InsertionBlock::NoFrontmostApp => "copied",
         InsertionBlock::TargetLost => "copied — focus moved",
     }
@@ -828,7 +831,7 @@ fn display_for(outcome: &SessionOutcome) -> Duration {
     match outcome {
         SessionOutcome::Compared { .. } => BAKEOFF_DISPLAY,
         SessionOutcome::Landed { outcome: InsertionOutcome::Inserted { .. }, .. } => SETTLE_DISPLAY,
-        SessionOutcome::Landed { outcome: InsertionOutcome::CopiedToClipboard(_), .. } | SessionOutcome::NothingHeard | SessionOutcome::Failed { .. } => WARNING_DISPLAY,
+        SessionOutcome::Landed { outcome: InsertionOutcome::CopiedToClipboard(_) | InsertionOutcome::Lost, .. } | SessionOutcome::NothingHeard | SessionOutcome::Failed { .. } => WARNING_DISPLAY,
     }
 }
 
@@ -840,4 +843,32 @@ fn tail(text: &str, max: usize) -> String {
     } else {
         format!("…{}", text.chars().skip(count - max).collect::<String>())
     }
+}
+
+/// Fonts baked into the binary so every Linux and Windows box renders the same: Inter for text
+/// (the open face closest to the Mac's system font), JetBrains Mono for keys and paths. Both SIL OFL;
+/// the licenses ship in `assets/`. egui's own fonts stay as fallbacks for emoji and symbols.
+fn install_fonts(ctx: &egui::Context) {
+    use egui::{FontData, FontDefinitions, FontFamily, FontId, TextStyle};
+    let mut fonts = FontDefinitions::default();
+    fonts.font_data.insert("Inter".into(), FontData::from_static(include_bytes!("../assets/Inter-Regular.ttf")).into());
+    fonts.font_data.insert("Inter-Medium".into(), FontData::from_static(include_bytes!("../assets/Inter-Medium.ttf")).into());
+    fonts.font_data.insert("JetBrainsMono".into(), FontData::from_static(include_bytes!("../assets/JetBrainsMono-Regular.ttf")).into());
+    fonts.families.entry(FontFamily::Proportional).or_default().insert(0, "Inter".into());
+    fonts.families.entry(FontFamily::Monospace).or_default().insert(0, "JetBrainsMono".into());
+    fonts.families.insert(FontFamily::Name("Medium".into()), vec!["Inter-Medium".into(), "Inter".into()]);
+    ctx.set_fonts(fonts);
+    ctx.style_mut(|style| {
+        // Mac-like sizes: 14 px body, 11 px captions, 22 px headings.
+        style.text_styles = [
+            (TextStyle::Small, FontId::new(11.0, FontFamily::Proportional)),
+            (TextStyle::Body, FontId::new(14.0, FontFamily::Proportional)),
+            (TextStyle::Button, FontId::new(14.0, FontFamily::Proportional)),
+            (TextStyle::Heading, FontId::new(22.0, FontFamily::Name("Medium".into()))),
+            (TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace)),
+        ]
+        .into();
+        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+        style.spacing.button_padding = egui::vec2(10.0, 5.0);
+    });
 }

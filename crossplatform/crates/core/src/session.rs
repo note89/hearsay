@@ -141,7 +141,8 @@ pub enum InsertionEvidence {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum InsertionBlock {
-    AllStrategiesFailed,
+    /// The paste keystroke could not be sent: no X11 or Wayland input connection.
+    KeystrokeFailed,
     NoFrontmostApp,
     TargetLost,
     /// The display server takes no injected keystrokes for native windows (Wayland): the text is on
@@ -152,7 +153,10 @@ pub enum InsertionBlock {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum InsertionOutcome {
     Inserted { evidence: InsertionEvidence },
+    /// The text is on the clipboard; the block says why it was not inserted.
     CopiedToClipboard(InsertionBlock),
+    /// The clipboard could not be reached either: the text exists only in History.
+    Lost,
 }
 
 pub trait Inserter: Send + Sync {

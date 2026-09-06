@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/core", "crates/engines", "crates/backends", "crates/app"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "GPL-3.0-only"
 
@@ -21,7 +21,7 @@ hound = "3"
 cpal = "0.15"
 global-hotkey = "0.6"
 enigo = "0.3"
-arboard = "3"
+arboard = { version = "3", features = ["wayland-data-control"] }
 eframe = "0.31"
 egui = "0.31"
 env_logger = "0.11"

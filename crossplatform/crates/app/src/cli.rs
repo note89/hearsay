@@ -1,7 +1,18 @@
 use hearsay_core::engine::Engine;
+use hearsay_core::session::Inserter;
 use hearsay_core::keystore::KeyStore;
 use hearsay_core::paths::support_dir;
 use std::time::Instant;
+
+/// Copies the text and sends the paste keystroke the way a dictation would; prints the outcome.
+pub fn insert(text: Option<&str>) {
+    let Some(text) = text else {
+        eprintln!("usage: hearsay-rs insert <text>");
+        std::process::exit(2);
+    };
+    let outcome = hearsay_backends::insert::PasteInserter::new().insert(text);
+    println!("{outcome:?}");
+}
 
 pub fn engines() {
     let keys = KeyStore::new(&support_dir());

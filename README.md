@@ -32,7 +32,7 @@ Push-to-talk dictation, built to beat the cloud subscription apps at their own g
 
 ### macOS (26 or newer)
 
-1. Download `hearsay-0.2.0.zip` from [Releases](https://github.com/note89/hearsay/releases), unzip, drag `hearsay.app` to `/Applications`.
+1. Download `hearsay-0.2.1.zip` from [Releases](https://github.com/note89/hearsay/releases), unzip, drag `hearsay.app` to `/Applications`.
 2. The app is signed with a local certificate, not a paid Apple Developer ID, so macOS refuses the first launch. **Right-click → Open → Open**, or:
    ```sh
    xattr -dr com.apple.quarantine /Applications/hearsay.app
@@ -68,10 +68,35 @@ If your fn key is bound to "Change Input Source" or emoji, that's fine: the hotk
    | | X11 | Wayland (GNOME and KDE default) |
    |---|---|---|
    | Hotkey | registered with the X server | read from the keyboard devices — `sudo usermod -aG input $USER`, then log out and in |
-   | Text | pasted at the caret | copied to the clipboard; the pill says "press Ctrl+V" (apps running under XWayland still get the paste) |
+   | Text | pasted at the caret | wlroots compositors (Hyprland, Sway): pasted at the caret · GNOME: copied, the pill says "press Ctrl+V" |
 
-   Wayland has no global hotkey and accepts no injected keystrokes for native windows; that's the compositor's rule, not ours. The Dictation pane tells you which path it is on.
+   Wayland has no global hotkey, that's the compositor's rule. Whether a paste can be injected is also the compositor's call: Hyprland, Sway and river accept virtual-keyboard input, so the text lands; GNOME refuses it, so the text goes to the clipboard. hearsay asks the compositor and reports honestly. The Dictation pane tells you which path it is on. `hearsay-rs insert "hello"` tests insertion by hand.
 4. Run `./hearsay-rs`. Dictation → **Download model**. Then put the cursor anywhere, **hold Ctrl+Alt+Space, talk, release.**
+
+### NixOS
+
+The prebuilt binary does not start on NixOS (no `/lib64` loader, no libraries in standard paths). Build it
+with the flake instead; it links the libraries and wraps the ones loaded at run time:
+
+```sh
+nix run github:note89/hearsay            # flakes enabled; first build compiles whisper.cpp, a few minutes
+```
+
+or in your configuration:
+
+```nix
+{
+  inputs.hearsay.url = "github:note89/hearsay";
+  # …
+  environment.systemPackages = [ inputs.hearsay.packages.${pkgs.system}.hearsay-rs ];
+  users.users.you.extraGroups = [ "input" ];   # Wayland: the hotkey reads the keyboard devices
+}
+```
+
+On Hyprland, Sway and other wlroots compositors the paste lands in the focused window (they offer
+virtual-keyboard input); on GNOME it goes to the clipboard, pill says "press Ctrl+V". `nix develop` gives
+a shell with the toolchain and every build dependency. If you really want the release binary,
+`nix-ld` or `steam-run ./hearsay-rs` will load it.
 
 ### Windows
 
@@ -86,6 +111,8 @@ The Download button offers two whisper.cpp models; the prebuilt binaries run the
 - **large-v3-turbo** (1.6 GB) — 99 languages with auto-detect, the best local accuracy. A few seconds per sentence on a good CPU. For a GPU, build from source with `--features cuda` (NVIDIA, needs the CUDA toolkit), `--features vulkan` (any Vulkan driver) or `--features metal` (Apple); these are whisper.cpp's own back ends, passed straight through, and we have not benchmarked them.
 
 Local models are batch: text appears at key-up. If you want partials in the pill on Linux or Windows, Gemini 3.5 Transcribe (cloud) streams.
+
+The release binaries are built with portable CPU flags (AVX2 baseline on x86-64, no `-march=native`), so they run on any machine from the last decade. A `cargo build` on your own machine tunes whisper.cpp to your CPU, which is a little faster.
 
 <p align="center">
   <img src="docs/linux-pill.png" width="480" alt="The pill while listening">
@@ -202,7 +229,7 @@ Tests: `cargo test --workspace`. Engine smoke test on a file: `hearsay-rs transc
 
 Design history: [PLAN.md](PLAN.md) (the concept design and the bet that started this), [PLAN-CROSSPLATFORM.md](PLAN-CROSSPLATFORM.md) (the Rust port, Wayland, the live engine), [DESIGN-REVIEW.md](DESIGN-REVIEW.md) (concept and data-structure reviews that shaped the refactors).
 
-Screenshots on this page are from the Linux build; the macOS window has the same panes.
+Screenshots on this page are from the Linux build; the macOS window has the same panes. The Linux and Windows window ships its own fonts — Inter for text, JetBrains Mono for keys and paths, both SIL OFL — so it looks the same on every machine.
 
 ## License
 

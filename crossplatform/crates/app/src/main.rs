@@ -1,5 +1,5 @@
 //! hearsay for Linux & Windows. `hearsay-rs` opens the app; `hearsay-rs transcribe file.wav`
-//! runs the selected local engine on a file (the smoke test for an engine install).
+//! runs an engine on a file; `hearsay-rs insert TEXT` pastes the way a dictation would.
 
 mod app;
 mod cli;
@@ -12,6 +12,7 @@ fn main() {
     match args.first().map(String::as_str) {
         Some("transcribe") => cli::transcribe(args.get(1).map(String::as_str), args.get(2).map(String::as_str)),
         Some("engines") => cli::engines(),
+        Some("insert") => cli::insert(args.get(1).map(String::as_str)),
         _ => {
             let options = eframe::NativeOptions {
                 viewport: egui::ViewportBuilder::default().with_title("hearsay").with_inner_size([920.0, 640.0]).with_min_inner_size([760.0, 520.0]),

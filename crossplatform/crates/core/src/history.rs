@@ -10,6 +10,9 @@ pub enum RecordedOutcome {
     CopiedToClipboard,
     #[serde(rename = "targetLost")]
     TargetLost,
+    /// Neither inserted nor on the clipboard: this record is the only copy.
+    #[serde(rename = "lost")]
+    Lost,
 }
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
