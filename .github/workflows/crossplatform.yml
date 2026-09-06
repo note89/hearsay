@@ -40,14 +40,21 @@ jobs:
       - name: Test
         run: cargo test --workspace
       - name: Build (release, local whisper on, portable CPU flags)
+        shell: bash
         env:
           CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/crossplatform/cmake/portable.cmake
-        run: cargo build --release -p hearsay-rs
+        run: |
+          # The toolchain file is not in cargo's fingerprint for the whisper-rs-sys build script, so a
+          # cached ggml (built native on an earlier run) would be reused. Always rebuild it.
+          cargo clean --release -p whisper-rs-sys
+          cargo build --release -p hearsay-rs
       - name: Portability check — ggml built without -march=native
         shell: bash
         run: |
-          cache=$(ls target/release/build/whisper-rs-sys-*/out/build/CMakeCache.txt | head -1)
-          grep -E "^GGML_NATIVE:BOOL=OFF" "$cache" || { echo "GGML_NATIVE is not OFF"; grep GGML_NATIVE "$cache"; exit 1; }
+          cache=$(find target/release/build -path "*whisper-rs-sys-*" -name CMakeCache.txt | head -1)
+          test -n "$cache" || { echo "no CMakeCache.txt under target/release/build"; find target/release/build -maxdepth 1 -name "whisper-rs-sys-*"; exit 1; }
+          echo "$cache"; grep -E "^GGML_(NATIVE|AVX2|AVX512):" "$cache"
+          grep -qE "^GGML_NATIVE:BOOL=OFF" "$cache" || { echo "GGML_NATIVE is not OFF"; exit 1; }
       - name: Linux headless smoke — window opens, hotkey registers on X11
         if: runner.os == 'Linux'
         run: |
