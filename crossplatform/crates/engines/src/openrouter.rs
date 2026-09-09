@@ -14,7 +14,8 @@ fn chat(key: &str, body: Value) -> Result<String, String> {
     let status = response.status();
     let json: Value = response.json().map_err(|e| format!("body: {e}"))?;
     if !status.is_success() {
-        return Err(format!("http {status}"));
+        let detail = json.pointer("/error/message").and_then(|m| m.as_str()).unwrap_or_default();
+        return Err(if status.as_u16() == 402 { format!("OpenRouter: no credits ({detail})") } else { format!("http {status} {detail}") });
     }
     json["choices"][0]["message"]["content"].as_str().map(String::from).ok_or_else(|| "unexpected response shape".to_string())
 }
@@ -56,10 +57,15 @@ pub struct OpenRouterPolisher {
 }
 
 impl OpenRouterPolisher {
-    pub const DEFAULT_MODEL: &'static str = "google/gemini-2.5-flash-lite";
+    /// The same model the Mac app's cloud cleanup uses: dense, structured rewrites of long dictations.
+    pub const DEFAULT_MODEL: &'static str = "google/gemini-3.7-flash";
 
     pub fn new(key: String) -> Self {
-        Self { model: Self::DEFAULT_MODEL.to_string(), key }
+        Self::with_model(Self::DEFAULT_MODEL, key)
+    }
+
+    pub fn with_model(model: &str, key: String) -> Self {
+        Self { model: model.to_string(), key }
     }
 }
 

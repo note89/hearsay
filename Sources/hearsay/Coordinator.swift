@@ -43,6 +43,8 @@ struct SessionRules {
     let engine: Engine
     let style: WritingStyle
     let polish: PolishMode
+    /// Resolved at press: the cloud choice falls back to on-device when no key is present.
+    let polishEngine: PolishEngine
     /// Field text around the cursor, captured at press. Feeds only the on-device polish model.
     let fieldContext: String?
     let lexicon: Lexicon
@@ -205,7 +207,14 @@ final class Coordinator {
     private static let warningDisplay: Duration = .milliseconds(2200)
     private static let bakeoffDisplay: Duration = .seconds(4)
     private static let transcriptionTimeout: Duration = .seconds(15)
-    private static let polishTimeout: Duration = .seconds(8)
+    /// Cleanup gets a floor plus time per word: the on-device model rewrites at roughly 40 tokens per second.
+    private static let polishTimeoutFloor: Duration = .seconds(6)
+    private static let polishTimeoutPerWord: Duration = .milliseconds(70)
+    private static let polishTimeoutCap: Duration = .seconds(40)
+
+    private static func polishTimeout(forWords words: Int) -> Duration {
+        min(polishTimeoutFloor + polishTimeoutPerWord * words, polishTimeoutCap)
+    }
     private static let rivalTimeout: Duration = .seconds(8)
     private static let gestureRetry: Duration = .seconds(3)
     /// Field text handed to the on-device polish model as terminology reference; bounded for its context window.
@@ -213,7 +222,7 @@ final class Coordinator {
 
     @ObservationIgnored private lazy var overlay = OverlayPanel()
     @ObservationIgnored private let capture = MicrophoneCapture()
-    @ObservationIgnored private let polisher = FoundationModelsPolisher()
+    @ObservationIgnored private let onDevicePolisher = FoundationModelsPolisher()
     @ObservationIgnored private var transcriber: any Transcriber
     @ObservationIgnored private var gestureMonitor: HoldGestureMonitor?
     @ObservationIgnored private var settleTask: Task<Void, Never>?
@@ -245,6 +254,10 @@ final class Coordinator {
     func select(engine chosen: Engine) {
         settings.engine = chosen
         activateEngine()
+    }
+
+    func set(polishEngine: PolishEngine) {
+        settings.polishEngine = polishEngine
     }
 
     func set(polish: PolishMode) {
@@ -352,11 +365,14 @@ final class Coordinator {
         }
         let armedTarget: InsertionTarget? = { if case .armed(let armed) = target { return armed }; return nil }()
         let polish = settings.polish
-        let fieldContext = (settings.fieldContextEnabled && polish != .off) ? armedTarget?.contextAroundCursor(maxChars: Self.fieldContextMaxChars) : nil
+        let polishEngine: PolishEngine = (settings.polishEngine == .openRouter && KeyStore.value("OPENROUTER_API_KEY") != nil) ? .openRouter : .onDevice
+        // Field context is read only when the on-device model will use it: it never leaves the Mac.
+        let fieldContext = (settings.fieldContextEnabled && polish != .off && polishEngine == .onDevice) ? armedTarget?.contextAroundCursor(maxChars: Self.fieldContextMaxChars) : nil
         let rules = SessionRules(
             engine: activeEngine,
             style: StyleInference.style(for: target),
             polish: polish,
+            polishEngine: polishEngine,
             fieldContext: fieldContext,
             lexicon: Lexicon.load(from: dictionaryURL)
         )
@@ -520,12 +536,17 @@ final class Coordinator {
             phase = .finishing(session, .polishing)
             overlay.render(.working(FinishingStep.polishing.label))
             let polishStart = clock.now
-            let polisher = self.polisher
+            let polisher: any Polisher
+            switch session.rules.polishEngine {
+            case .onDevice: polisher = onDevicePolisher
+            case .openRouter: polisher = OpenRouterPolisher(key: KeyStore.value("OPENROUTER_API_KEY") ?? "")
+            }
             let style = session.rules.style
             let text = raw.text
             let context = PolishContext(fieldText: session.rules.fieldContext, terms: session.rules.lexicon.terms)
             let intensity: PolishIntensity = session.rules.polish == .light ? .light : .full
-            let verdict: PolishVerdict = await Self.race(timeout: Self.polishTimeout) { () -> PolishVerdict in
+            let words = text.split(whereSeparator: \.isWhitespace).count
+            let verdict: PolishVerdict = await Self.race(timeout: Self.polishTimeout(forWords: words)) { () -> PolishVerdict in
                 await polisher.polish(text, style: style, intensity: intensity, context: context)
             } ?? PolishVerdict.keepRaw(.timeout)
             switch verdict {
@@ -700,7 +721,7 @@ final class Coordinator {
     // MARK: - Bootstrap & bridge
 
     private func bootstrap() async {
-        polisher.prewarm()
+        onDevicePolisher.prewarm()
         startGesture()
         activateEngine()
         Task {

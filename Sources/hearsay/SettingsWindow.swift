@@ -312,7 +312,7 @@ private struct StylePane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            PaneHeader(title: "Style", subtitle: "How much cleanup every dictation gets. All of it runs on this Mac.")
+            PaneHeader(title: "Style", subtitle: "How much cleanup every dictation gets, and which model does it.")
             Toggle(isOn: Binding(
                 get: { coordinator.settings.fieldContextEnabled },
                 set: { coordinator.set(fieldContextEnabled: $0) }
@@ -343,6 +343,22 @@ private struct StylePane: View {
                     example: "Send the invoice by Friday; cc Sara.",
                     selected: coordinator.settings.polish == .full
                 ) { coordinator.set(polish: .full) }
+            }
+
+            Text("CLEANUP MODEL").font(.caption.bold()).foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 12) {
+                CleanupCard(
+                    title: "On this Mac",
+                    blurb: "Apple's on-device model. Private, free, offline. Good for short dictations; long rewrites stay loose.",
+                    example: "field context stays on the Mac",
+                    selected: coordinator.settings.polishEngine == .onDevice
+                ) { coordinator.set(polishEngine: .onDevice) }
+                CleanupCard(
+                    title: OpenRouterTranscriber.keyAvailable ? "Cloud (OpenRouter)" : "Cloud (OpenRouter) — needs key",
+                    blurb: "Gemini 3.7 Flash. Dense, structured rewrites of long dictations. Sends the transcript and your dictionary terms, never field context. About a cent per long dictation.",
+                    example: "OPENROUTER_API_KEY in keys.env",
+                    selected: coordinator.settings.polishEngine == .openRouter
+                ) { if OpenRouterTranscriber.keyAvailable { coordinator.set(polishEngine: .openRouter) } }
             }
 
             Divider().padding(.vertical, 4)

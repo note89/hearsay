@@ -31,7 +31,7 @@
           ]);
           hearsay-rs = pkgs.rustPlatform.buildRustPackage {
             pname = "hearsay-rs";
-            version = "0.2.1";
+            version = "0.2.2";
             src = ./crossplatform;
             cargoLock.lockFile = ./crossplatform/Cargo.lock;
             cargoBuildFlags = [ "-p" "hearsay-rs" ];

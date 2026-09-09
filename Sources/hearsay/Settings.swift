@@ -7,6 +7,13 @@ enum PolishMode: String {
     case full
 }
 
+/// Which model does the cleanup. On-device is private and free; the cloud model is stronger on long
+/// rewrites and never receives field context.
+enum PolishEngine: String {
+    case onDevice
+    case openRouter
+}
+
 @MainActor @Observable
 final class Settings {
     private enum Key {
@@ -16,6 +23,7 @@ final class Settings {
         static let history = "historyEnabled"
         static let fieldContext = "fieldContextEnabled"
         static let raceExclusions = "raceExclusions"
+        static let polishEngine = "polishEngine"
     }
 
     private static let defaultLocale = "en-US"
@@ -26,6 +34,10 @@ final class Settings {
 
     var polish: PolishMode {
         didSet { UserDefaults.standard.set(polish.rawValue, forKey: Key.polish) }
+    }
+
+    var polishEngine: PolishEngine {
+        didSet { UserDefaults.standard.set(polishEngine.rawValue, forKey: Key.polishEngine) }
     }
 
     var engine: Engine {
@@ -58,6 +70,7 @@ final class Settings {
         let defaults = UserDefaults.standard
         locale = Locale(identifier: defaults.string(forKey: Key.locale) ?? Self.defaultLocale)
         polish = PolishMode(rawValue: defaults.string(forKey: Key.polish) ?? "") ?? .full
+        polishEngine = PolishEngine(rawValue: defaults.string(forKey: Key.polishEngine) ?? "") ?? .onDevice
         engine = defaults.string(forKey: Key.engine).flatMap(Engine.init(wireKey:)) ?? .appleLocal
         historyEnabled = defaults.object(forKey: Key.history) as? Bool ?? true
         fieldContextEnabled = defaults.object(forKey: Key.fieldContext) as? Bool ?? true

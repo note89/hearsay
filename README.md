@@ -32,7 +32,7 @@ Push-to-talk dictation, built to beat the cloud subscription apps at their own g
 
 ### macOS (26 or newer)
 
-1. Download `hearsay-0.2.1.zip` from [Releases](https://github.com/note89/hearsay/releases), unzip, drag `hearsay.app` to `/Applications`.
+1. Download `hearsay-0.2.2.zip` from [Releases](https://github.com/note89/hearsay/releases), unzip, drag `hearsay.app` to `/Applications`.
 2. The app is signed with a local certificate, not a paid Apple Developer ID, so macOS refuses the first launch. **Right-click → Open → Open**, or:
    ```sh
    xattr -dr com.apple.quarantine /Applications/hearsay.app
@@ -126,7 +126,7 @@ Everything lives in one window (macOS: menu bar → **Open hearsay…**; Linux a
 |---|---|
 | **Dictation** | engine cards, model download, language (only when the engine needs one), API keys, field context toggle, permissions |
 | **Dictionary** | your terms (`mprocs`) and rewrites (`mprox => mprocs`) — a plain text file underneath |
-| **Style** | cleanup level with example outputs; on macOS the app→tone table |
+| **Style** | cleanup level with example outputs, and which model does it: on this machine, or Gemini 3.7 Flash via OpenRouter for long, structured rewrites; on macOS the app→tone table |
 | **Bake-off** | the comparison lab — see below |
 | **History** | every dictation that didn't land, recoverable; per-record delete, clear, off-switch |
 
@@ -154,7 +154,7 @@ Only the cloud engines need one. hearsay finds keys on its own, in this order: t
 
 | Key | Unlocks | Where to get it |
 |---|---|---|
-| `OPENROUTER_API_KEY` | Gemini 3.7 Flash, cloud cleanup on Linux/Windows | https://openrouter.ai/keys |
+| `OPENROUTER_API_KEY` | Gemini 3.7 Flash as an engine, and the cloud cleanup model on every platform | https://openrouter.ai/keys |
 | `GEMINI_API_KEY` | Gemini 3.5 Transcribe Live | https://aistudio.google.com/apikey |
 | `ELEVEN_LABS_API_KEY` | Scribe v2 (not reachable via OpenRouter) | https://elevenlabs.io |
 
@@ -163,7 +163,7 @@ Data folder: macOS `~/Library/Application Support/hearsay`, Linux `~/.local/shar
 ## Privacy, precisely
 
 - Local engines: audio, transcript, field context — nothing leaves the machine.
-- On macOS the cleanup model always runs on-device, so field context and dictionary terms are never uploaded even when a cloud transcription engine is selected. On Linux and Windows, cleanup is a cloud model through OpenRouter and off by default; Off keeps everything local.
+- Cleanup runs on-device by default on macOS. The cloud cleanup model (OpenRouter) is opt-in, on every platform, and receives exactly the transcript and your dictionary terms: field context is never read when the cloud model is selected, so nothing from your screen leaves the machine. Off keeps everything local.
 - Secure (password) fields: on macOS dictation is blocked before the microphone even starts. Linux and Windows cannot detect them; a dictated password would land in History, so pause History first.
 - The system log gets timings and outcomes, never content. History is 0600, clearable, optional. Clipboard writes are marked transient on macOS so clipboard managers skip them.
 - Cloud engines upload exactly one thing: the utterance audio, to the provider you picked.
@@ -216,6 +216,8 @@ Tests: `cargo test --workspace`. Engine smoke test on a file: `hearsay-rs transc
 - **"copied — press Ctrl+V" every time.** That's Wayland: the text is on your clipboard, paste it. XWayland apps (many Electron apps) still receive the paste.
 - **"microphone: no input device" on Linux.** ALSA sees no capture device. With PipeWire, `pipewire-alsa` (or `pipewire-pulse` + `alsa-plugins`) provides the `default` device; `arecord -l` should list something.
 - **Engine says "needs key".** Paste the key in the Dictation pane, or export it in your shell profile and restart hearsay.
+- **Cleanup kept the raw text.** The log says why (`kept raw (timeout|failed|…)`). Long dictations take the on-device model 20 s or more; the cloud model does them in 2 s. "OpenRouter: no credits" means the balance at https://openrouter.ai/settings/credits is empty.
+- **Cleanup output is loose on long dictations.** That's the on-device model's ceiling. Style → Cleanup model → Cloud, with an OpenRouter key, gives Wispr-grade rewrites: paragraphs, lists, fixed product names.
 - **macOS keeps asking for permissions after a rebuild.** `scripts/fix-permissions.sh`, once.
 - **Windows SmartScreen blocks the exe.** More info → Run anyway. The binary is built by GitHub Actions from this repository.
 

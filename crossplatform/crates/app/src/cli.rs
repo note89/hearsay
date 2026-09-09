@@ -14,6 +14,35 @@ pub fn insert(text: Option<&str>) {
     println!("{outcome:?}");
 }
 
+/// Cleanup on a transcript file through OpenRouter: the output and how long it took.
+pub fn polish(path: Option<&str>, model: Option<&str>, intensity: Option<&str>) {
+    use hearsay_core::polish::{PolishContext, PolishIntensity, PolishVerdict, Polisher, WritingStyle};
+    let Some(path) = path else {
+        eprintln!("usage: hearsay-rs polish <file.txt> [openrouter model] [light|full]");
+        std::process::exit(2);
+    };
+    let spoken = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("cannot read {path}: {e}");
+        std::process::exit(1);
+    });
+    let keys = KeyStore::new(&support_dir());
+    let Some(key) = keys.value("OPENROUTER_API_KEY") else {
+        eprintln!("OPENROUTER_API_KEY missing");
+        std::process::exit(1);
+    };
+    let model = model.unwrap_or(hearsay_engines::openrouter::OpenRouterPolisher::DEFAULT_MODEL);
+    let intensity = if intensity == Some("light") { PolishIntensity::Light } else { PolishIntensity::Full };
+    let polisher = hearsay_engines::openrouter::OpenRouterPolisher::with_model(model, key);
+    let started = Instant::now();
+    match polisher.polish(spoken.trim(), WritingStyle::Plain, intensity, &PolishContext { field_text: None, terms: Vec::new() }) {
+        PolishVerdict::Accept(polished) => {
+            println!("{}", polished.text());
+            eprintln!("[{model} · {intensity:?} · accepted · {} ms]", started.elapsed().as_millis());
+        }
+        PolishVerdict::KeepRaw(rejection) => eprintln!("[{model} · rejected: {rejection:?} · {} ms]", started.elapsed().as_millis()),
+    }
+}
+
 pub fn engines() {
     let keys = KeyStore::new(&support_dir());
     for engine in Engine::all() {

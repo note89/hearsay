@@ -13,6 +13,7 @@ fn main() {
         Some("transcribe") => cli::transcribe(args.get(1).map(String::as_str), args.get(2).map(String::as_str)),
         Some("engines") => cli::engines(),
         Some("insert") => cli::insert(args.get(1).map(String::as_str)),
+        Some("polish") => cli::polish(args.get(1).map(String::as_str), args.get(2).map(String::as_str), args.get(3).map(String::as_str)),
         _ => {
             let options = eframe::NativeOptions {
                 viewport: egui::ViewportBuilder::default().with_title("hearsay").with_inner_size([920.0, 640.0]).with_min_inner_size([760.0, 520.0]),

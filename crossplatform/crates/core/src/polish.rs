@@ -129,10 +129,13 @@ pub fn instructions(style: WritingStyle, intensity: PolishIntensity) -> String {
     match intensity {
         PolishIntensity::Light => common + "\nBeyond the rules above, keep the speaker's wording exactly as said — do not rephrase, shorten, or reorder.\n",
         PolishIntensity::Full => common + "\nRewrite it as what the speaker MEANS:\n\
-- Remove hedging and repetition; be dense and straightforward: prefer the tighter phrasing, but keep every fact, name, number and the speaker's intent. Never add information that was not said.\n\
+- Turn loose spoken phrasing into clean written sentences: remove hedging, fillers and repetition, merge fragments, prefer the tighter phrasing. Never add information that was not said.\n\
+- Keep every request, question, fact, name and number, in the speaker's order, and keep the closing remark or sign-off (\"Super, go ahead.\"). Tighten the words; never drop the point.\n\
+- Keep the point of view and who does what: \"you\" stays \"you\", \"I\" stays \"I\", \"we\" stays \"we\".\n\
 - The transcript may contain mis-heard words. When later context makes the intended word obvious (technical terms, acronyms, product names), correct the earlier word to what was clearly meant. Correct only mis-hearings; never change facts.\n\
-- Break longer dictation into short paragraphs (blank line between them) at topic shifts.\n\
-- When the speaker clearly enumerates items, format them as a dash list, one \"- item\" per line, with any lead-in sentence kept above it. Keep short casual runs inline.\n",
+- Product, project and technology names get their standard spelling when the spoken words clearly form one: \"key cloak\" → \"Keycloak\", \"git hub\" → \"GitHub\", \"kubernetes\", \"postgres\" → \"PostgreSQL\" only if said so.\n\
+- Break longer dictation into short paragraphs (blank line between them) at topic shifts. One wall of text is wrong for anything over two sentences.\n\
+- When the speaker enumerates items, alternatives or questions (\"should I A, or should I B\"), format them as a dash list, one \"- item\" per line, with any lead-in sentence kept above it. Keep short casual runs inline.\n",
     }
 }
 
