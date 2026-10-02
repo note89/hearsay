@@ -1,3 +1,16 @@
+## Index
+
+- [How to install](#how-to-install)
+- [Using it](#using-it)
+- [Engines](#engines)
+- [Privacy, precisely](#privacy-precisely)
+- [The bake-off](#the-bake-off)
+- [Field context & dictionary](#field-context--dictionary)
+- [Build from source](#build-from-source)
+- [Troubleshooting](#troubleshooting)
+- [Where the decisions live](#where-the-decisions-live)
+- [License](#license)
+
 <p align="center">
   <img src="docs/logo.png" width="128" alt="hearsay logo">
 </p>
@@ -28,7 +41,7 @@ Push-to-talk dictation, built to beat the cloud subscription apps at their own g
   <img src="docs/macos-dictation.png" width="820" alt="The native macOS Dictation pane: Apple on-device and downloadable speech models">
 </p>
 
-## Get running
+## How to install
 
 ### macOS (Apple Silicon, 26 or newer)
 
