@@ -19,6 +19,14 @@ struct HearsayApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let coordinator = Coordinator()
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        coordinator.refreshPermissions()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        coordinator.stop()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         coordinator.start()

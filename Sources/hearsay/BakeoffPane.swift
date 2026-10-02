@@ -11,7 +11,8 @@ struct BakeoffPane: View {
         VStack(alignment: .leading, spacing: 16) {
             PaneHeader(
                 title: "Bake-off",
-                subtitle: "Same audio, same key-up, one clock, every engine at once. Run Wispr Flow alongside. While this pane is front, dictations score instead of inserting. Engines are scored on their raw text — Style is a separate concept."
+                subtitle:
+                    "Same audio, same key-up, one clock, every engine at once. Run Wispr Flow alongside. While this pane is front, dictations score instead of inserting. Engines are scored on their raw text — Style is a separate concept."
             )
             lineup
             HStack {
@@ -34,7 +35,7 @@ struct BakeoffPane: View {
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .quaternarySystemFill)))
                 .overlay(alignment: .topLeading) {
                     if fieldText.isEmpty {
-                        Text("click here, hold fn+shift, read the sentence, release")
+                        Text("click here, hold \(coordinator.settings.shortcut.label), read the sentence, release")
                             .foregroundStyle(.secondary)
                             .padding(.top, 14).padding(.leading, 14)
                             .allowsHitTesting(false)
@@ -48,7 +49,7 @@ struct BakeoffPane: View {
         .onAppear { coordinator.bakeoffPaneVisible = true }
         .onDisappear { coordinator.bakeoffPaneVisible = false }
         .onChange(of: coordinator.bakeoff.takes.count) { _, _ in
-            fieldText = ""   // a take landed (or was retaken): the box is ready for the next sentence
+            fieldText = ""  // a take landed (or was retaken): the box is ready for the next sentence
         }
     }
 
@@ -67,7 +68,9 @@ struct BakeoffPane: View {
         HStack(spacing: 8) {
             ForEach(Engine.all, id: \.wireKey) { engine in
                 let racing = coordinator.settings.isRacing(engine) && engine.isAvailable
-                Button { coordinator.settings.toggleRacing(engine) } label: {
+                Button {
+                    coordinator.settings.toggleRacing(engine)
+                } label: {
                     HStack(spacing: 6) {
                         Image(systemName: racing ? "checkmark.circle.fill" : "circle")
                             .foregroundStyle(racing ? Color.accentColor : Color.secondary)
@@ -92,9 +95,14 @@ struct BakeoffPane: View {
                 let sentence = BakeoffScript.sentences[position]
                 Text("sentence \(position + 1) of \(BakeoffScript.sentences.count) · \(sentence.language)")
                     .font(.caption).foregroundStyle(.secondary)
-                if position > 0, BakeoffScript.sentences[position - 1].language != sentence.language, coordinator.settings.isRacing(.appleLocal) {
-                    Label("Apple is locked to one language: switch it to \(Locale(identifier: sentence.language).languageDisplayName), or expect it to lose this one", systemImage: "globe")
-                        .font(.caption).foregroundStyle(.orange)
+                if position > 0, BakeoffScript.sentences[position - 1].language != sentence.language,
+                    coordinator.settings.isRacing(.appleLocal)
+                {
+                    Label(
+                        "Apple is locked to one language: switch it to \(Locale(identifier: sentence.language).languageDisplayName), or expect it to lose this one",
+                        systemImage: "globe"
+                    )
+                    .font(.caption).foregroundStyle(.orange)
                 }
                 Text(sentence.text)
                     .font(.system(size: 19, weight: .semibold))
@@ -113,18 +121,23 @@ struct BakeoffPane: View {
         HStack(alignment: .top, spacing: 12) {
             ForEach(summary.leaderboard) { engine in
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("\(Self.name(engine.engineKey).uppercased()) — \(engine.scored) scored\(engine.failed > 0 ? " · \(engine.failed) failed" : "")")
-                        .font(.caption2.bold()).foregroundStyle(.secondary)
+                    Text(
+                        "\(Self.name(engine.engineKey).uppercased()) — \(engine.scored) scored\(engine.failed > 0 ? " · \(engine.failed) failed" : "")"
+                    )
+                    .font(.caption2.bold()).foregroundStyle(.secondary)
                     if engine.scored > 0 {
-                        Text("\(Self.percent(engine.meanOursWer)) · \(engine.meanOursMs) ms")
+                        let timing = Text("\(Self.percent(engine.meanOursWer)) · \(engine.meanOursMs) ms")
                             .font(.title3.bold()).foregroundStyle(.green)
-                            + Text("  to text ready").font(.caption2).foregroundStyle(.secondary)
+                        let caption = Text("  to text ready").font(.caption2).foregroundStyle(.secondary)
+                        Text("\(timing)\(caption)")
                     } else {
                         Text("no text yet").font(.title3.bold()).foregroundStyle(.secondary)
                     }
                     if engine.decided > 0 {
-                        Text("vs wispr \(engine.wins)–\(engine.losses)\(engine.ties > 0 ? " (\(engine.ties) tied)" : "") · wispr \(Self.percent(engine.meanRivalWer)) · \(engine.meanRivalMs) ms")
-                            .font(.caption).foregroundStyle(.orange)
+                        Text(
+                            "vs wispr \(engine.wins)–\(engine.losses)\(engine.ties > 0 ? " (\(engine.ties) tied)" : "") · wispr \(Self.percent(engine.meanRivalWer)) · \(engine.meanRivalMs) ms"
+                        )
+                        .font(.caption).foregroundStyle(.orange)
                     }
                 }
                 .padding(12)
@@ -136,13 +149,15 @@ struct BakeoffPane: View {
     @ViewBuilder
     private func verdict(_ summary: RunSummary) -> some View {
         if let leader = summary.leader, leader.decided >= 3 {
-            Text(leader.wins >= leader.losses
-                 ? "🏆 \(Self.name(leader.engineKey)) leads at \(Self.percent(leader.meanOursWer)) · \(leader.meanOursMs) ms, and beats wispr \(leader.wins)–\(leader.losses) — by WER only"
-                 : "\(Self.name(leader.engineKey)) leads our side at \(Self.percent(leader.meanOursWer)), but wispr wins \(leader.losses)–\(leader.wins) — by WER only")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .quaternarySystemFill)))
+            Text(
+                leader.wins >= leader.losses
+                    ? "🏆 \(Self.name(leader.engineKey)) leads at \(Self.percent(leader.meanOursWer)) · \(leader.meanOursMs) ms, and beats wispr \(leader.wins)–\(leader.losses) — by WER only"
+                    : "\(Self.name(leader.engineKey)) leads our side at \(Self.percent(leader.meanOursWer)), but wispr wins \(leader.losses)–\(leader.wins) — by WER only"
+            )
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .quaternarySystemFill)))
         }
     }
 
@@ -193,9 +208,10 @@ struct BakeoffPane: View {
 
     private func diffText(reference: String, hypothesis: String) -> Text {
         Scorer.diff(reference: reference, hypothesis: hypothesis).reduce(Text("")) { partial, segment in
-            partial + Text(segment.text)
+            let fragment = Text(segment.text)
                 .foregroundColor(segment.verdict == .wrong ? .red : .secondary)
                 .underline(segment.verdict == .wrong)
+            return Text("\(partial)\(fragment)")
         }
         .font(.caption)
     }

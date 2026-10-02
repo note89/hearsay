@@ -30,15 +30,22 @@ Push-to-talk dictation, built to beat the cloud subscription apps at their own g
 
 ## Get running
 
-### macOS (26 or newer)
+### macOS (Apple Silicon, 26 or newer)
 
-1. Download `hearsay-0.2.2.zip` from [Releases](https://github.com/note89/hearsay/releases), unzip, drag `hearsay.app` to `/Applications`.
-2. The app is signed with a local certificate, not a paid Apple Developer ID, so macOS refuses the first launch. **Right-click → Open → Open**, or:
-   ```sh
-   xattr -dr com.apple.quarantine /Applications/hearsay.app
-   ```
-3. Grant three permissions, once: **Microphone** (the prompt), then *hearsay* under **Accessibility** and **Input Monitoring** in System Settings → Privacy & Security. Menu bar → Relaunch. The menu shows "⚠ Fix permissions…" until all three are there.
-4. Put the cursor anywhere you can type. **Hold fn+shift, talk, release.**
+Install with Homebrew:
+
+```sh
+brew install --cask note89/tap/hearsay
+open /Applications/hearsay.app
+```
+
+Or download `hearsay-0.3.0.zip` from [Releases](https://github.com/note89/hearsay/releases), unzip, and drag `hearsay.app` to `/Applications`. The app is signed with an Apple Developer ID, notarized, and carries its notarization ticket for offline verification.
+
+Menu bar → **Open hearsay…** → **General** shows the permission setup. Click **Enable** for **Microphone**, **Input Monitoring**, and **Accessibility**, granting each when macOS asks. Accessibility enables insertion; without it, finished text goes to the clipboard. Relaunch after granting Input Monitoring when macOS asks.
+
+Put the cursor anywhere you can type. **Hold fn+shift, talk, release.** General options let you choose another modifier shortcut and position the floating bar. No Hearsay account is required.
+
+Update a Homebrew install with `brew upgrade --cask note89/tap/hearsay`. About → **Check for updates** can check GitHub and open the latest release for a manual download.
 
 If your fn key is bound to "Change Input Source" or emoji, that's fine: the hotkey is the fn+shift chord, which doesn't collide.
 
@@ -124,11 +131,14 @@ Everything lives in one window (macOS: menu bar → **Open hearsay…**; Linux a
 
 | Pane | What's there |
 |---|---|
-| **Dictation** | engine cards, model download, language (only when the engine needs one), API keys, field context toggle, permissions |
+| **General** (macOS) | dictation shortcut, pause dictation, launch at login, floating bar preview and position reset |
+| **Dictation** | engine cards, model download on Linux/Windows, language (only when the engine needs one), permissions |
+| **Cloud providers** (macOS) | optional provider keys, secure Keychain storage, key source and removal; on Linux/Windows, keys live in Dictation |
 | **Dictionary** | your terms (`mprocs`) and rewrites (`mprox => mprocs`) — a plain text file underneath |
 | **Style** | cleanup level with example outputs, and which model does it: on this machine, or Gemini 3.7 Flash via OpenRouter for long, structured rewrites; on macOS the app→tone table |
 | **Bake-off** | the comparison lab — see below |
-| **History** | every dictation that didn't land, recoverable; per-record delete, clear, off-switch |
+| **History** | recent dictations, recoverable; per-record delete, clear, off-switch |
+| **About** (macOS) | app version, manual update check, releases and Homebrew update instructions |
 
 <p align="center">
   <img src="docs/linux-style.png" width="410" alt="Style pane"> <img src="docs/linux-dictionary.png" width="410" alt="Dictionary pane">
@@ -150,7 +160,7 @@ Which to pick: offline and English, base.en or Apple. Offline and Swedish, large
 
 ### API keys
 
-Only the cloud engines need one. hearsay finds keys on its own, in this order: the process environment, `keys.env` in the data folder, then your shell profile (`~/.zshrc`, `~/.bashrc`, `~/.profile`…). The Dictation pane shows where each key was found, and has a field to paste one in; it is saved to `keys.env`, readable only by you.
+Only the cloud engines need a key. On macOS, enter a key in **Cloud providers** and save it securely in the login Keychain. Keys are resolved from the Keychain, process environment, `keys.env`, then `~/.zshrc`. The pane shows where a key was found and lets you remove a saved key without displaying it. Removing a Keychain entry can reveal an existing environment or file key. On Linux and Windows, the Dictation pane saves keys to `keys.env`, readable only by you; keys are resolved from the process environment, that file, then supported shell profiles.
 
 | Key | Unlocks | Where to get it |
 |---|---|---|
@@ -158,7 +168,7 @@ Only the cloud engines need one. hearsay finds keys on its own, in this order: t
 | `GEMINI_API_KEY` | Gemini 3.5 Transcribe Live | https://aistudio.google.com/apikey |
 | `ELEVEN_LABS_API_KEY` | Scribe v2 (not reachable via OpenRouter) | https://elevenlabs.io |
 
-Data folder: macOS `~/Library/Application Support/hearsay`, Linux `~/.local/share/hearsay`, Windows `%APPDATA%\hearsay\data`. The same files on every platform — history, dictionary, bake-off runs, keys — so the folder moves with you.
+Data folder: macOS `~/Library/Application Support/hearsay`, Linux `~/.local/share/hearsay`, Windows `%APPDATA%\hearsay\data`. History, dictionary and bake-off files share a format across platforms. Keys saved in the macOS Keychain stay in that Keychain rather than moving with the data folder.
 
 ## Privacy, precisely
 
@@ -167,6 +177,7 @@ Data folder: macOS `~/Library/Application Support/hearsay`, Linux `~/.local/shar
 - Secure (password) fields: on macOS dictation is blocked before the microphone even starts. Linux and Windows cannot detect them; a dictated password would land in History, so pause History first.
 - The system log gets timings and outcomes, never content. History is 0600, clearable, optional. Clipboard writes are marked transient on macOS so clipboard managers skip them.
 - Cloud engines upload exactly one thing: the utterance audio, to the provider you picked.
+- Update checks contact GitHub only when you choose **Check for updates**. They send no dictation content or API keys. Launch at login and cloud engines are optional.
 
 ## The bake-off
 
@@ -193,7 +204,24 @@ git clone https://github.com/note89/hearsay && cd hearsay
 scripts/bundle.sh && open build/hearsay.app
 ```
 
-Building repeatedly? Run `scripts/fix-permissions.sh` once — it creates a stable local signing certificate so macOS permission grants survive rebuilds. Tests: `swift run bakeoff-tests`.
+Local builds prefer the same Developer ID as releases, then `hearsay-dev`, and finally ad-hoc signing when neither certificate is available. On a Mac without a Developer ID, `scripts/fix-permissions.sh` creates the stable development certificate so permission grants survive rebuilds. Every build uses the hardened runtime and microphone entitlement. Tests: `scripts/test.sh` and `swift run bakeoff-tests`. The test script supports both Command Line Tools and Xcode. The prebuilt native app targets Apple Silicon.
+
+To produce a distributable release on the Mac holding the Developer ID private key:
+
+```sh
+# First set and commit the version in Resources/Info.plist.
+scripts/release.sh 0.3.0             # build, sign, notarize, staple, verify, archive
+scripts/release.sh 0.3.0 --publish   # clean tree required; draft, tag, CI checks, publish
+```
+
+The default notarization credentials are the `devid-notary` keychain profile. `HEARSAY_SIGN_IDENTITY` and `HEARSAY_NOTARY_PROFILE` override the signing identity and profile. Credentials never leave the Keychain. `scripts/verify-release.sh build/hearsay.app --notarized` verifies the app identity, arm64 architecture, hardened runtime, microphone entitlement, stapled ticket and Gatekeeper acceptance. The archive and SHA-256 file land in `build/`. The crossplatform workflow attaches its archives to the staged release after its build and NixOS checks pass; it never creates or publishes a release itself. Update the Homebrew tap's version and checksum after publishing.
+
+Homebrew uses the separate [note89/homebrew-tap](https://github.com/note89/homebrew-tap) repository. For each new release:
+
+1. Publish the notarized archive with the same `hearsay-VERSION.zip` name.
+2. Use the tap checkout installed by `brew tap note89/tap` (`brew --repository note89/tap` prints its path). Update `Casks/hearsay.rb` with that version and the SHA-256 from `build/hearsay-VERSION.zip.sha256`. Keep the Apple Silicon and macOS 26 requirements.
+3. Check the cask with `brew style Casks/hearsay.rb` and `brew audit --cask --online hearsay`, then commit and push the tap.
+4. Refresh with `brew update` and verify `brew info --cask note89/tap/hearsay` and an install or upgrade. Tap updates are a separate publication step; the app release script does not push the tap.
 
 **Linux** — Rust 1.85+, plus the build-time versions of the runtime libraries and whisper.cpp's toolchain:
 
@@ -208,17 +236,17 @@ cargo run --release -p hearsay-rs          # add --features cuda|vulkan for a GP
 
 **Windows** — Visual Studio Build Tools (C++ workload), cmake and Rust, then the same `cargo run`.
 
-Tests: `cargo test --workspace`. Engine smoke test on a file: `hearsay-rs transcribe clip.wav [engine wire key]`; `hearsay-rs engines` lists the keys. Every push builds all three platforms in [Actions](https://github.com/note89/hearsay/actions/workflows/crossplatform.yml) and runs the Linux window under Xvfb.
+Tests: `cargo test --workspace`. Engine smoke test on a file: `hearsay-rs transcribe clip.wav [engine wire key]`; `hearsay-rs engines` lists the keys. Changes to the Rust app trigger all three platform builds in [Actions](https://github.com/note89/hearsay/actions/workflows/crossplatform.yml) and run the Linux window under Xvfb. Native macOS changes run Swift tests and a hardened runtime build in [macOS CI](https://github.com/note89/hearsay/actions/workflows/macos.yml).
 
 ## Troubleshooting
 
 - **"Hotkey could not be registered" on Linux.** You are on Wayland and not in the `input` group: `sudo usermod -aG input $USER`, log out and in. Or log into an X11 session.
 - **"copied — press Ctrl+V" every time.** That's Wayland: the text is on your clipboard, paste it. XWayland apps (many Electron apps) still receive the paste.
 - **"microphone: no input device" on Linux.** ALSA sees no capture device. With PipeWire, `pipewire-alsa` (or `pipewire-pulse` + `alsa-plugins`) provides the `default` device; `arecord -l` should list something.
-- **Engine says "needs key".** Paste the key in the Dictation pane, or export it in your shell profile and restart hearsay.
+- **Engine says "needs key".** On macOS, save the key in Cloud providers. On Linux/Windows, paste it in Dictation, or export it in your shell profile and restart hearsay.
 - **Cleanup kept the raw text.** The log says why (`kept raw (timeout|failed|…)`). Long dictations take the on-device model 20 s or more; the cloud model does them in 2 s. "OpenRouter: no credits" means the balance at https://openrouter.ai/settings/credits is empty.
 - **Cleanup output is loose on long dictations.** That's the on-device model's ceiling. Style → Cleanup model → Cloud, with an OpenRouter key, gives Wispr-grade rewrites: paragraphs, lists, fixed product names.
-- **macOS keeps asking for permissions after a rebuild.** `scripts/fix-permissions.sh`, once.
+- **macOS keeps asking for permissions after a rebuild.** Use the Developer ID identity consistently, or run `scripts/fix-permissions.sh` once on a development Mac without it. Moving from an older self-signed release to the Developer ID release may require granting permissions once again.
 - **Windows SmartScreen blocks the exe.** More info → Run anyway. The binary is built by GitHub Actions from this repository.
 
 ## Where the decisions live
@@ -231,7 +259,7 @@ Tests: `cargo test --workspace`. Engine smoke test on a file: `hearsay-rs transc
 
 Design history: [PLAN.md](PLAN.md) (the concept design and the bet that started this), [PLAN-CROSSPLATFORM.md](PLAN-CROSSPLATFORM.md) (the Rust port, Wayland, the live engine), [DESIGN-REVIEW.md](DESIGN-REVIEW.md) (concept and data-structure reviews that shaped the refactors).
 
-Screenshots on this page are from the Linux build; the macOS window has the same panes. The Linux and Windows window ships its own fonts — Inter for text, JetBrains Mono for keys and paths, both SIL OFL — so it looks the same on every machine.
+Screenshots on this page are from the Linux build. macOS also has General, Cloud providers, and About panes for its native setup and options. The Linux and Windows window ships its own fonts — Inter for text, JetBrains Mono for keys and paths, both SIL OFL — so it looks the same on every machine.
 
 ## License
 

@@ -1,17 +1,53 @@
+import AVFoundation
 import AppKit
 import ApplicationServices
-import AVFoundation
 
-struct PermissionReport: Equatable {
-    var microphone: Bool
-    var accessibility: Bool
-    var inputMonitoring: Bool
+enum MicrophonePermission: Equatable {
+    case notRequested
+    case granted
+    case denied
+    case restricted
 }
 
-enum PermissionPane {
+struct PermissionReport: Equatable {
+    let microphonePermission: MicrophonePermission
+    let accessibility: Bool
+    let inputMonitoring: Bool
+
+    var microphone: Bool { microphonePermission == .granted }
+    var allGranted: Bool { microphone && accessibility && inputMonitoring }
+
+    func isGranted(_ pane: PermissionPane) -> Bool {
+        switch pane {
+        case .microphone: return microphone
+        case .accessibility: return accessibility
+        case .inputMonitoring: return inputMonitoring
+        }
+    }
+}
+
+enum PermissionPane: CaseIterable, Identifiable, Hashable {
     case microphone
-    case accessibility
     case inputMonitoring
+    case accessibility
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .microphone: return "Microphone"
+        case .inputMonitoring: return "Input Monitoring"
+        case .accessibility: return "Accessibility"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .microphone: return "Hear your voice while you hold the shortcut."
+        case .inputMonitoring: return "Detect the hold shortcut in every app."
+        case .accessibility: return "Insert the finished text at your cursor. Without it, text is copied."
+        }
+    }
 
     fileprivate var anchor: String {
         switch self {
@@ -23,19 +59,36 @@ enum PermissionPane {
 }
 
 enum Permissions {
-    /// Prompts for whatever is missing. Accessibility and Input Monitoring open System Settings and need a relaunch after granting.
+    /// Permission prompts only follow a click on the corresponding setup action.
     @MainActor
-    static func request() async -> PermissionReport {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        let accessibility = AXIsProcessTrustedWithOptions(options)
-        let inputMonitoring = CGRequestListenEventAccess()
-        let microphone = await AVCaptureDevice.requestAccess(for: .audio)
-        return PermissionReport(microphone: microphone, accessibility: accessibility, inputMonitoring: inputMonitoring)
+    static func request(_ pane: PermissionPane) async -> PermissionReport {
+        switch pane {
+        case .microphone:
+            if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+                _ = await AVCaptureDevice.requestAccess(for: .audio)
+            } else if AVCaptureDevice.authorizationStatus(for: .audio) == .denied {
+                openSettings(pane)
+            }
+        case .accessibility:
+            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+            _ = AXIsProcessTrustedWithOptions(options)
+        case .inputMonitoring:
+            if !CGRequestListenEventAccess() { openSettings(pane) }
+        }
+        return check()
     }
 
     static func check() -> PermissionReport {
-        PermissionReport(
-            microphone: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
+        let microphone: MicrophonePermission
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: microphone = .granted
+        case .notDetermined: microphone = .notRequested
+        case .denied: microphone = .denied
+        case .restricted: microphone = .restricted
+        @unknown default: microphone = .restricted
+        }
+        return PermissionReport(
+            microphonePermission: microphone,
             accessibility: AXIsProcessTrusted(),
             inputMonitoring: CGPreflightListenEventAccess()
         )
@@ -54,8 +107,14 @@ enum Relaunch {
         process.arguments = ["-n", Bundle.main.bundleURL.path]
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(400))
-            try? process.run()
-            NSApp.terminate(nil)
+            do {
+                try process.run()
+                NSApp.terminate(nil)
+            } catch {
+                let alert = NSAlert(error: error)
+                alert.messageText = "Hearsay could not relaunch"
+                alert.runModal()
+            }
         }
     }
 }

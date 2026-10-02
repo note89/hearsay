@@ -1,39 +1,69 @@
 import CoreGraphics
 import Foundation
-import os
 
-public enum GestureEvent {
+public enum GestureEvent: Equatable, Sendable {
     case pressed
     case released
 }
 
-public struct ModifierChord: Equatable {
-    public let flags: CGEventFlags
+/// Supported hold shortcuts all use two modifiers, so ordinary typing never starts a recording.
+public enum ModifierChord: String, CaseIterable, Identifiable, Sendable {
+    case fnShift
+    case fnControl
+    case fnOption
+    case controlShift
+    case optionShift
 
-    public init(flags: CGEventFlags) {
-        self.flags = flags
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .fnShift: return "Fn + Shift"
+        case .fnControl: return "Fn + Control"
+        case .fnOption: return "Fn + Option"
+        case .controlShift: return "Control + Shift"
+        case .optionShift: return "Option + Shift"
+        }
     }
 
-    public static let fnShift = ModifierChord(flags: [.maskSecondaryFn, .maskShift])
+    public var flags: CGEventFlags {
+        switch self {
+        case .fnShift: return [.maskSecondaryFn, .maskShift]
+        case .fnControl: return [.maskSecondaryFn, .maskControl]
+        case .fnOption: return [.maskSecondaryFn, .maskAlternate]
+        case .controlShift: return [.maskControl, .maskShift]
+        case .optionShift: return [.maskAlternate, .maskShift]
+        }
+    }
+
+    public func isHeld(by flags: CGEventFlags) -> Bool { flags.contains(self.flags) }
 }
 
-public enum GestureMonitorFailure: Error {
+public enum GestureMonitorFailure: Error, Equatable {
     case inputMonitoringDenied
     case tapCreationFailed
 }
 
-private enum ChordState {
-    case up
-    case down
+struct ModifierHoldState {
+    private(set) var isHeld = false
+
+    mutating func transition(toHeld held: Bool) -> GestureEvent? {
+        guard isHeld != held else { return nil }
+        isHeld = held
+        return held ? .pressed : .released
+    }
 }
 
-/// Reports `.pressed` the moment the whole chord is held and `.released` the moment any key of it lifts.
+/// Reports a press when the whole chord is held and a release when any of its keys lifts.
+/// Start and stop on the main thread, where the event tap is installed.
 public final class HoldGestureMonitor {
-    private let chord: ModifierChord
+    public let chord: ModifierChord
+    public var isHeld: Bool { state.isHeld }
+
     private let onEvent: (GestureEvent) -> Void
-    private var state: ChordState = .up
+    private var state = ModifierHoldState()
     private var tap: CFMachPort?
-    private let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "hearsay", category: "gesture")
+    private var source: CFRunLoopSource?
 
     public init(chord: ModifierChord, onEvent: @escaping (GestureEvent) -> Void) {
         self.chord = chord
@@ -50,57 +80,56 @@ public final class HoldGestureMonitor {
             }
             return Unmanaged.passUnretained(event)
         }
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .listenOnly,
-            eventsOfInterest: CGEventMask(1 << CGEventType.flagsChanged.rawValue),
-            callback: callback,
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ) else { throw GestureMonitorFailure.tapCreationFailed }
+        guard
+            let tap = CGEvent.tapCreate(
+                tap: .cgSessionEventTap,
+                place: .headInsertEventTap,
+                options: .listenOnly,
+                eventsOfInterest: CGEventMask(1 << CGEventType.flagsChanged.rawValue),
+                callback: callback,
+                userInfo: Unmanaged.passUnretained(self).toOpaque()
+            )
+        else { throw GestureMonitorFailure.tapCreationFailed }
+        guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
+            CFMachPortInvalidate(tap)
+            throw GestureMonitorFailure.tapCreationFailed
+        }
 
         self.tap = tap
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        self.source = source
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
     }
 
-    deinit {
-        stop()
-    }
+    deinit { stop() }
 
     public func stop() {
-        guard let tap else { return }
-        CGEvent.tapEnable(tap: tap, enable: false)
-        CFMachPortInvalidate(tap)
-        self.tap = nil
+        if let source {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+            CFRunLoopSourceInvalidate(source)
+            self.source = nil
+        }
+        if let tap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
+            self.tap = nil
+        }
+        transition(chordHeld: false)
     }
 
     private func handle(type: CGEventType, event: CGEvent) {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
-            // Events were lost while disabled — resynchronize with the live modifier state.
-            transition(chordHeld: CGEventSource.flagsState(.combinedSessionState).contains(chord.flags))
+            transition(chordHeld: chord.isHeld(by: CGEventSource.flagsState(.combinedSessionState)))
         case .flagsChanged:
-            let held = event.flags.contains(chord.flags)
-            log.debug("flagsChanged: flags=0x\(String(event.flags.rawValue, radix: 16), privacy: .public) key=\(event.getIntegerValueField(.keyboardEventKeycode)) chordHeld=\(held)")
-            transition(chordHeld: held)
+            transition(chordHeld: chord.isHeld(by: event.flags))
         default:
             break
         }
     }
 
     private func transition(chordHeld: Bool) {
-        switch (state, chordHeld) {
-        case (.up, true):
-            state = .down
-            onEvent(.pressed)
-        case (.down, false):
-            state = .up
-            onEvent(.released)
-        case (.up, false), (.down, true):
-            break
-        }
+        if let event = state.transition(toHeld: chordHeld) { onEvent(event) }
     }
 }

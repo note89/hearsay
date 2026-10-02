@@ -20,5 +20,9 @@ let package = Package(
             name: "hearsay",
             dependencies: ["Utterance", "Audio", "Transcription", "Polish", "Insertion", "History", "Overlay", "Bakeoff", "Lexicon"]
         ),
+        .testTarget(name: "OverlayTests", dependencies: ["Overlay"]),
+        .testTarget(name: "TranscriptionTests", dependencies: ["Transcription"]),
+        .testTarget(name: "UtteranceTests", dependencies: ["Utterance"]),
+        .testTarget(name: "HearsayAppTests", dependencies: ["hearsay"]),
     ]
 )

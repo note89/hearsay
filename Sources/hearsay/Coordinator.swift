@@ -1,16 +1,16 @@
+import AVFoundation
 import AppKit
 import Audio
-import AVFoundation
 import Bakeoff
 import History
 import Insertion
 import Lexicon
 import Observation
-import os
 import Overlay
 import Polish
 import Transcription
 import Utterance
+import os
 
 /// Text bound for the target, with its provenance. Only the Coordinator unwraps this into the
 /// bare String that the Insertion mechanism takes.
@@ -120,6 +120,7 @@ enum GestureStatus: Equatable {
     case stopped
     case listening
     case denied
+    case failed
 }
 
 /// One engine hearing the utterance. A dictation has one; a race has one per engine.
@@ -175,6 +176,12 @@ final class Coordinator {
     private(set) var lastTiming: SessionTiming?
     private(set) var engine: EngineStatus = .preparing
     private(set) var gesture: GestureStatus = .stopped
+    private(set) var permissionReport = Permissions.check()
+    private(set) var requestingPermission: PermissionPane?
+    private(set) var barPreviewVisible = false
+    private(set) var keyStatuses: [APIKeyProvider: APIKeyStatus] = [:]
+    let launchAtLogin = LaunchAtLogin()
+    let updater = Updater()
     private(set) var availableLocales: [Locale] = []
     /// The engine sessions actually run on: the chosen one when its key is present, else Apple.
     /// The user's choice in Settings is never overwritten by availability.
@@ -188,7 +195,10 @@ final class Coordinator {
             byLanguage[locale.language.languageCode?.identifier ?? locale.identifier, default: []].append(locale)
         }
         let userRegion = Locale.current.region?.identifier
-        let preferred = ["en": "en_US", "pt": "pt_PT", "sv": "sv_SE", "de": "de_DE", "fr": "fr_FR", "es": "es_ES", "it": "it_IT", "nl": "nl_NL", "zh": "zh_CN"]
+        let preferred = [
+            "en": "en_US", "pt": "pt_PT", "sv": "sv_SE", "de": "de_DE", "fr": "fr_FR", "es": "es_ES", "it": "it_IT", "nl": "nl_NL",
+            "zh": "zh_CN",
+        ]
         return byLanguage.map { language, variants in
             if let regional = variants.first(where: { $0.region?.identifier == userRegion }) { return regional }
             if let canonical = preferred[language], let match = variants.first(where: { $0.identifier == canonical }) { return match }
@@ -225,7 +235,14 @@ final class Coordinator {
     @ObservationIgnored private let onDevicePolisher = FoundationModelsPolisher()
     @ObservationIgnored private var transcriber: any Transcriber
     @ObservationIgnored private var gestureMonitor: HoldGestureMonitor?
+    @ObservationIgnored private var gestureGeneration: UUID?
+    @ObservationIgnored private var gestureRetryTask: Task<Void, Never>?
+    @ObservationIgnored private var bootstrapTask: Task<Void, Never>?
+    @ObservationIgnored private var microphonePrepared = false
+    @ObservationIgnored private var pendingEngineRefresh = false
+    @ObservationIgnored private var isRunning = false
     @ObservationIgnored private var settleTask: Task<Void, Never>?
+    @ObservationIgnored private var finishTask: Task<Void, Never>?
     @ObservationIgnored private var loadModelTask: Task<Void, Never>?
     @ObservationIgnored private let clock = ContinuousClock()
     @ObservationIgnored private let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "hearsay", category: "session")
@@ -237,23 +254,130 @@ final class Coordinator {
         history = HistoryStore(directory: support)
         dictionaryURL = support.appendingPathComponent("dictionary.txt")
         bakeoff = BakeoffStore(directory: support)
-        transcriber = SpeechAnalyzerTranscriber(locale: settings.locale)   // placeholder; bootstrap rebuilds from the persisted engine
+        transcriber = SpeechAnalyzerTranscriber(locale: settings.locale)  // placeholder; bootstrap rebuilds from the persisted engine
     }
 
     func start() {
-        Task { await bootstrap() }
+        guard bootstrapTask == nil else { return }
+        isRunning = true
+        bootstrapTask = Task { await bootstrap() }
+    }
+
+    func stop() {
+        isRunning = false
+        bootstrapTask?.cancel()
+        bootstrapTask = nil
+        gestureRetryTask?.cancel()
+        gestureRetryTask = nil
+        switch phase {
+        case .listening(let session):
+            capture.stop()
+            for contender in session.contenders { contender.transcription.cancel() }
+            session.rivalWatch?.cancel()
+        case .finishing(let session, _):
+            for contender in session.contenders { contender.transcription.cancel() }
+            session.rivalWatch?.cancel()
+        case .idle, .settled: break
+        }
+        finishTask?.cancel()
+        finishTask = nil
+        phase = .idle
+        stopGesture()
+        loadModelTask?.cancel()
+        settleTask?.cancel()
+        endBarPreview()
+        overlay.render(.hidden)
+    }
+
+    func refreshPermissions() {
+        permissionReport = Permissions.check()
+        launchAtLogin.refresh()
+        if !permissionReport.microphone { microphonePrepared = false }
+        if permissionReport.microphone, !microphonePrepared {
+            capture.prepare()
+            microphonePrepared = true
+        }
+        guard isRunning else { return }
+        if !permissionReport.inputMonitoring {
+            stopGesture()
+            if !settings.dictationPaused { gesture = .denied }
+            scheduleGestureRetry()
+        } else if !settings.dictationPaused {
+            startGesture()
+        }
+    }
+
+    func requestPermission(_ pane: PermissionPane) async {
+        guard requestingPermission == nil else { return }
+        requestingPermission = pane
+        _ = await Permissions.request(pane)
+        requestingPermission = nil
+        refreshPermissions()
+    }
+
+    func select(shortcut: ModifierChord) {
+        settings.shortcut = shortcut
+        guard gestureMonitor?.isHeld != true else { return }
+        startGesture()
+    }
+
+    func set(dictationPaused: Bool) {
+        settings.dictationPaused = dictationPaused
+        if dictationPaused {
+            gestureRetryTask?.cancel()
+            gestureRetryTask = nil
+            stopGesture()
+        } else {
+            refreshPermissions()
+        }
+    }
+
+    func refreshKeys() {
+        keyStatuses = Dictionary(uniqueKeysWithValues: APIKeyProvider.allCases.map { ($0, KeyStore.status($0)) })
+        requestEngineRefresh()
+    }
+
+    private func requestEngineRefresh() {
+        if sessionInFlight { pendingEngineRefresh = true } else { activateEngine() }
+    }
+
+    func previewBar() {
+        guard !sessionInFlight else { return }
+        settleTask?.cancel()
+        phase = .idle
+        barPreviewVisible = true
+        overlay.preview()
+    }
+
+    func endBarPreview() {
+        guard barPreviewVisible else { return }
+        barPreviewVisible = false
+        overlay.endPreview()
+    }
+
+    func resetBarPosition() { overlay.resetPosition() }
+
+    var sessionInFlight: Bool {
+        switch phase {
+        case .listening, .finishing: return true
+        case .idle, .settled: return false
+        }
+    }
+
+    var shortcutChangePending: Bool {
+        gestureMonitor.map { $0.chord != settings.shortcut } ?? false
     }
 
     // MARK: - Intents
 
     func select(locale: Locale) {
         settings.locale = locale
-        activateEngine()
+        requestEngineRefresh()
     }
 
     func select(engine chosen: Engine) {
         settings.engine = chosen
-        activateEngine()
+        requestEngineRefresh()
     }
 
     func set(polishEngine: PolishEngine) {
@@ -350,6 +474,13 @@ final class Coordinator {
             return
         case .idle, .settled: break
         }
+        guard !settings.dictationPaused else { return }
+        refreshPermissions()
+        guard permissionReport.microphone else {
+            settle(.failed(reason: "allow microphone in Hearsay settings", salvaged: nil, app: "—"))
+            return
+        }
+        endBarPreview()
         settleTask?.cancel()
         guard case .ready = engine else {
             log.error("pressed: engine not ready")
@@ -363,11 +494,17 @@ final class Coordinator {
             settle(.blockedSecure)
             return
         }
-        let armedTarget: InsertionTarget? = { if case .armed(let armed) = target { return armed }; return nil }()
+        let armedTarget: InsertionTarget? = {
+            if case .armed(let armed) = target { return armed }
+            return nil
+        }()
         let polish = settings.polish
-        let polishEngine: PolishEngine = (settings.polishEngine == .openRouter && KeyStore.value("OPENROUTER_API_KEY") != nil) ? .openRouter : .onDevice
+        let polishEngine: PolishEngine =
+            (settings.polishEngine == .openRouter && KeyStore.value("OPENROUTER_API_KEY") != nil) ? .openRouter : .onDevice
         // Field context is read only when the on-device model will use it: it never leaves the Mac.
-        let fieldContext = (settings.fieldContextEnabled && polish != .off && polishEngine == .onDevice) ? armedTarget?.contextAroundCursor(maxChars: Self.fieldContextMaxChars) : nil
+        let fieldContext =
+            (settings.fieldContextEnabled && polish != .off && polishEngine == .onDevice)
+            ? armedTarget?.contextAroundCursor(maxChars: Self.fieldContextMaxChars) : nil
         let rules = SessionRules(
             engine: activeEngine,
             style: StyleInference.style(for: target),
@@ -380,7 +517,8 @@ final class Coordinator {
         // so activation state and view lifecycle cannot disagree with it.
         let plan: SessionPlan
         if let armed = armedTarget, armed.app.pid == ProcessInfo.processInfo.processIdentifier,
-           case .textElement = armed.focused, bakeoffPaneVisible {
+            case .textElement = armed.focused, bakeoffPaneVisible
+        {
             let position = bakeoff.takes.count
             let expected = position < BakeoffScript.sentences.count ? BakeoffScript.sentences[position].text : nil
             if let baseline = armed.currentText() {
@@ -420,17 +558,19 @@ final class Coordinator {
         let contenders = zip(lineup, Self.fanOut(audio, count: lineup.count)).map { entry, stream in
             let (engine, engineTranscriber) = entry
             let reportsPartials = engine == pillEngine
-            return Contender(engine: engine, transcription: Task { [weak self] () throws -> RawTranscript in
-                var final: RawTranscript?
-                for try await event in engineTranscriber.transcribe(stream, hints: hints) {
-                    switch event {
-                    case .partial(let text): if reportsPartials { self?.partial(text, token: token) }
-                    case .final(let transcript): final = transcript
+            return Contender(
+                engine: engine,
+                transcription: Task { [weak self] () throws -> RawTranscript in
+                    var final: RawTranscript?
+                    for try await event in engineTranscriber.transcribe(stream, hints: hints) {
+                        switch event {
+                        case .partial(let text): if reportsPartials { self?.partial(text, token: token) }
+                        case .final(let transcript): final = transcript
+                        }
                     }
-                }
-                guard let final else { throw TranscriptionFailure.endedWithoutFinal }
-                return final
-            })
+                    guard let final else { throw TranscriptionFailure.endedWithoutFinal }
+                    return final
+                })
         }
         phase = .listening(LiveSession(token: token, rules: rules, plan: plan, contenders: contenders))
         overlay.render(.listening(partial: ""))
@@ -439,6 +579,7 @@ final class Coordinator {
     func released() {
         guard case .listening(let session) = phase else {
             log.notice("released: ignored, no session listening")
+            applyPendingShortcut()
             return
         }
         capture.stop()
@@ -453,7 +594,8 @@ final class Coordinator {
         phase = .finishing(session, step)
         overlay.render(.working(step.label))
         log.notice("released: partial length \(session.partial.count)")
-        Task { await finish(session) }
+        finishTask = Task { await finish(session) }
+        applyPendingShortcut()
     }
 
     /// The engines a take races: the user's selection minus any without a key. Never empty.
@@ -493,16 +635,18 @@ final class Coordinator {
             session.partial = text
             overlay.render(.listening(partial: text))
         case .finishing(let session, _) where session.token == token:
-            session.partial = text   // salvage must see text finalized after release
+            session.partial = text  // salvage must see text finalized after release
         default:
             break
         }
     }
 
     private func finish(_ session: LiveSession) async {
+        guard !Task.isCancelled, isRunning else { return }
         switch session.plan {
         case .dictate(let destination): await finishDictation(session, into: destination)
-        case .bakeoff(let target, let expected, let runID, let takeID): await finishRace(session, target: target, expected: expected, runID: runID, takeID: takeID)
+        case .bakeoff(let target, let expected, let runID, let takeID):
+            await finishRace(session, target: target, expected: expected, runID: runID, takeID: takeID)
         }
     }
 
@@ -514,6 +658,7 @@ final class Coordinator {
         do {
             raw = try await Self.value(of: session.contenders[0].transcription, within: Self.transcriptionTimeout)
         } catch {
+            guard !Task.isCancelled, isRunning else { return }
             session.rivalWatch?.cancel()
             log.error("finish: transcription failed: \(String(describing: error))")
             var salvaged: String?
@@ -524,6 +669,7 @@ final class Coordinator {
             settle(.failed(reason: "transcription failed", salvaged: salvaged, app: session.appName))
             return
         }
+        guard !Task.isCancelled, isRunning else { return }
         timing.transcribe = clock.now - transcribeStart
         guard !raw.text.isEmpty else {
             session.rivalWatch?.cancel()
@@ -546,15 +692,17 @@ final class Coordinator {
             let context = PolishContext(fieldText: session.rules.fieldContext, terms: session.rules.lexicon.terms)
             let intensity: PolishIntensity = session.rules.polish == .light ? .light : .full
             let words = text.split(whereSeparator: \.isWhitespace).count
-            let verdict: PolishVerdict = await Self.race(timeout: Self.polishTimeout(forWords: words)) { () -> PolishVerdict in
-                await polisher.polish(text, style: style, intensity: intensity, context: context)
-            } ?? PolishVerdict.keepRaw(.timeout)
+            let verdict: PolishVerdict =
+                await Self.race(timeout: Self.polishTimeout(forWords: words)) { () -> PolishVerdict in
+                    await polisher.polish(text, style: style, intensity: intensity, context: context)
+                } ?? PolishVerdict.keepRaw(.timeout)
             switch verdict {
             case .accept(let polished): delivered = .polished(polished, spoken: raw)
             case .keepRaw(let rejection): log.notice("finish: kept raw (\(rejection.label, privacy: .public))")
             }
             timing.polish = clock.now - polishStart
         }
+        guard !Task.isCancelled, isRunning else { return }
         if let rewritten = session.rules.lexicon.rewriteResult(of: delivered.text) {
             delivered = .rewritten(text: rewritten, over: delivered)
         }
@@ -569,7 +717,9 @@ final class Coordinator {
         }
         timing.insert = clock.now - insertStart
         lastTiming = timing
-        log.notice("session: transcribe \(timing.transcribe.milliseconds) ms · polish \(timing.polish.milliseconds) ms · insert \(timing.insert.milliseconds) ms · \(Self.summary(of: outcome), privacy: .public)")
+        log.notice(
+            "session: transcribe \(timing.transcribe.milliseconds) ms · polish \(timing.polish.milliseconds) ms · insert \(timing.insert.milliseconds) ms · \(Self.summary(of: outcome), privacy: .public)"
+        )
         settle(.landed(outcome, delivered, timing, app: session.appName))
     }
 
@@ -586,15 +736,19 @@ final class Coordinator {
                     do {
                         let raw = try await Self.value(of: contender.transcription, within: Self.transcriptionTimeout)
                         let ms = (clock.now - releasedAt).milliseconds
-                        let outcome: EngineOutcome = raw.text.isEmpty ? .failed(reason: "nothing heard") : .scored(spoken: raw.text, ours: raw.text, ms: ms)
+                        let outcome: EngineOutcome =
+                            raw.text.isEmpty ? .failed(reason: "nothing heard") : .scored(spoken: raw.text, ours: raw.text, ms: ms)
                         return (index, EngineResult(engine: key, outcome: outcome))
                     } catch {
-                        return (index, EngineResult(engine: key, outcome: .failed(reason: error is OperationTimeout ? "timed out" : "failed")))
+                        return (
+                            index, EngineResult(engine: key, outcome: .failed(reason: error is OperationTimeout ? "timed out" : "failed"))
+                        )
                     }
                 }
             }
             for await entry in group { results.append((entry.0, entry.1)) }
         }
+        guard !Task.isCancelled, isRunning else { return }
         results.sort { $0.index < $1.index }
 
         phase = .finishing(session, .watchingRival)
@@ -604,7 +758,9 @@ final class Coordinator {
         case .watchable: rival = await session.rivalWatch?.value ?? .unobservable
         case .unobservable: rival = .unobservable
         }
-        let take = Take(id: takeID.uuidString, app: session.appName, expected: expected, rival: RivalOutcome(rival), results: results.map(\.result))
+        guard !Task.isCancelled, isRunning else { return }
+        let take = Take(
+            id: takeID.uuidString, app: session.appName, expected: expected, rival: RivalOutcome(rival), results: results.map(\.result))
         if runID == bakeoff.runID {
             bakeoff.append(take)
         } else {
@@ -614,12 +770,19 @@ final class Coordinator {
             guard case .scored(_, _, let ms) = result.outcome, let engine = Engine(wireKey: result.engine) else { return nil }
             return (engine, .milliseconds(ms))
         }.min { $0.ms < $1.ms }
-        log.notice("bakeoff: raced \(take.results.count) · fastest \(fastest?.ms.milliseconds ?? -1) ms · rival \(Self.summary(of: rival), privacy: .public)")
+        log.notice(
+            "bakeoff: raced \(take.results.count) · fastest \(fastest?.ms.milliseconds ?? -1) ms · rival \(Self.summary(of: rival), privacy: .public)"
+        )
         settle(.compared(RaceOutcome(fastest: fastest, rival: rival, app: session.appName)))
     }
 
     private func settle(_ outcome: SessionOutcome) {
+        guard isRunning else { return }
         phase = .settled(outcome)
+        if pendingEngineRefresh {
+            pendingEngineRefresh = false
+            activateEngine()
+        }
         let state = Self.overlayState(for: outcome)
         overlay.render(state)
         if settings.historyEnabled, let entry = Self.historyEntry(for: outcome) { history.record(entry) }
@@ -722,40 +885,63 @@ final class Coordinator {
 
     private func bootstrap() async {
         onDevicePolisher.prewarm()
-        startGesture()
-        activateEngine()
+        refreshPermissions()
+        refreshKeys()
         Task {
             availableLocales = await SpeechAnalyzerTranscriber.supportedLocales()
                 .sorted { $0.displayName < $1.displayName }
         }
-        let granted = await Permissions.request()
-        log.notice("bootstrap: microphone=\(granted.microphone) accessibility=\(granted.accessibility) inputMonitoring=\(granted.inputMonitoring)")
-        capture.prepare()
     }
 
     private func startGesture() {
-        let monitor = HoldGestureMonitor(chord: .fnShift) { [weak self] event in
+        guard isRunning, !settings.dictationPaused else { return }
+        guard gestureMonitor?.chord != settings.shortcut else { return }
+        guard gestureMonitor?.isHeld != true else { return }
+        gestureRetryTask?.cancel()
+        gestureRetryTask = nil
+        stopGesture()
+        let generation = UUID()
+        let monitor = HoldGestureMonitor(chord: settings.shortcut) { [weak self] event in
             MainActor.assumeIsolated {
+                guard let self, self.gestureGeneration == generation else { return }
                 switch event {
-                case .pressed: self?.pressed()
-                case .released: self?.released()
+                case .pressed: self.pressed()
+                case .released: self.released()
                 }
             }
         }
         do {
             try monitor.start()
+            gestureGeneration = generation
             gestureMonitor = monitor
             gesture = .listening
-            log.notice("startGesture: listening for fn+shift")
+            log.notice("startGesture: listening for \(self.settings.shortcut.label, privacy: .public)")
         } catch {
-            if gesture != .denied {
-                log.error("startGesture: \(String(describing: error), privacy: .public) — retrying every \(Self.gestureRetry.milliseconds) ms until granted")
-            }
-            gesture = .denied
-            Task { [weak self] in
-                try? await Task.sleep(for: Self.gestureRetry)
-                self?.startGesture()
-            }
+            gesture = (error as? GestureMonitorFailure) == .inputMonitoringDenied ? .denied : .failed
+            scheduleGestureRetry()
+        }
+    }
+
+    private func stopGesture() {
+        let previous = gestureMonitor
+        gestureMonitor = nil
+        gestureGeneration = nil
+        previous?.stop()
+        if case .listening = phase { released() }
+        gesture = .stopped
+    }
+
+    private func applyPendingShortcut() {
+        if shortcutChangePending { startGesture() }
+    }
+
+    private func scheduleGestureRetry() {
+        guard isRunning, !settings.dictationPaused, gestureRetryTask == nil else { return }
+        gestureRetryTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.gestureRetry)
+            guard !Task.isCancelled, let self else { return }
+            self.gestureRetryTask = nil
+            self.refreshPermissions()
         }
     }
 
@@ -791,7 +977,10 @@ final class Coordinator {
     private static func race<T: Sendable>(timeout: Duration, _ work: @escaping @Sendable () async -> T) async -> T? {
         let once = OnceResume<T?>()
         return await withCheckedContinuation { continuation in
-            let worker = Task { let value = await work(); once.resume(continuation, with: value) }
+            let worker = Task {
+                let value = await work()
+                once.resume(continuation, with: value)
+            }
             Task {
                 try? await Task.sleep(for: timeout)
                 once.resume(continuation, with: nil)

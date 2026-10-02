@@ -1,0 +1,41 @@
+name: macOS
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths: ["Sources/**", "Tests/**", "Package.swift", "Resources/**", "scripts/**", ".swift-format", ".github/workflows/macos.yml"]
+  pull_request:
+    paths: ["Sources/**", "Tests/**", "Package.swift", "Resources/**", "scripts/**", ".swift-format", ".github/workflows/macos.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          swift --version
+          xcrun --sdk macosx --show-sdk-version
+      - name: Shell and bundle metadata
+        run: |
+          for script in scripts/*.sh; do bash -n "$script"; done
+          plutil -lint Resources/Info.plist Resources/hearsay.entitlements
+      - name: Test
+        run: scripts/test.sh
+      - name: Bake-off scoring checks
+        run: swift run bakeoff-tests
+      - name: Build hardened runtime bundle
+        env:
+          HEARSAY_SIGN_IDENTITY: "-"
+        run: |
+          scripts/bundle.sh release
+          scripts/verify-release.sh build/hearsay.app

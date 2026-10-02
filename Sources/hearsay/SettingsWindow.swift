@@ -1,23 +1,29 @@
 import AppKit
+import Combine
 import History
 import Lexicon
-import Combine
 import Polish
 import SwiftUI
 import Transcription
 
 enum SettingsSection: String, CaseIterable, Identifiable {
+    case general = "General"
     case dictation = "Dictation"
+    case providers = "Cloud providers"
     case dictionary = "Dictionary"
     case style = "Style"
     case bakeoff = "Bake-off"
     case history = "History"
+    case about = "About"
 
     var id: String { rawValue }
 
     var icon: String {
         switch self {
+        case .general: return "slider.horizontal.3"
         case .dictation: return "mic"
+        case .providers: return "key"
+        case .about: return "info.circle"
         case .dictionary: return "character.book.closed"
         case .style: return "textformat"
         case .bakeoff: return "flag.checkered"
@@ -28,7 +34,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
 struct SettingsWindowView: View {
     let coordinator: Coordinator
-    @State private var section: SettingsSection? = .dictation
+    @State private var section: SettingsSection? = .general
 
     var body: some View {
         NavigationSplitView {
@@ -39,7 +45,10 @@ struct SettingsWindowView: View {
         } detail: {
             ScrollView {
                 Group {
-                    switch section ?? .dictation {
+                    switch section ?? .general {
+                    case .general: GeneralPane(coordinator: coordinator)
+                    case .providers: ProvidersPane(coordinator: coordinator)
+                    case .about: AboutPane(coordinator: coordinator)
                     case .dictation: DictationPane(coordinator: coordinator)
                     case .dictionary: DictionaryPane(coordinator: coordinator)
                     case .style: StylePane(coordinator: coordinator)
@@ -53,7 +62,11 @@ struct SettingsWindowView: View {
             }
         }
         .frame(minWidth: 780, minHeight: 540)
-        .navigationTitle("hearsay")
+        .navigationTitle("Hearsay")
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            coordinator.refreshPermissions()
+        }
+        .onDisappear { coordinator.endBarPreview() }
     }
 }
 
@@ -76,11 +89,17 @@ private struct DictationPane: View {
     let coordinator: Coordinator
 
     var body: some View {
+        let _ = coordinator.keyStatuses
         VStack(alignment: .leading, spacing: 18) {
-            PaneHeader(title: "Dictation", subtitle: "Hold fn+shift anywhere. Release, and the words land at your cursor.")
+            PaneHeader(
+                title: "Dictation",
+                subtitle: "Hold \(coordinator.settings.shortcut.label) anywhere. Release, and the words land at your cursor.")
             if coordinator.activeEngine != coordinator.settings.engine {
-                Label("\(coordinator.settings.engine.label) needs its API key — dictating with Apple on-device until it is added. Your choice is kept.", systemImage: "key")
-                    .font(.callout).foregroundStyle(.orange)
+                Label(
+                    "\(coordinator.settings.engine.label) needs its API key — dictating with Apple on-device until it is added. Your choice is kept.",
+                    systemImage: "key"
+                )
+                .font(.callout).foregroundStyle(.orange)
             }
 
             Text("ENGINE").font(.caption.bold()).foregroundStyle(.secondary)
@@ -91,10 +110,8 @@ private struct DictationPane: View {
                     select: { coordinator.select(engine: engineOption) }
                 )
             }
-            HStack {
-                Button("API Keys…") { NSWorkspace.shared.open(KeyStore.ensureFile()) }
-                Text("Cloud engines unlock when their key is present.").font(.caption).foregroundStyle(.secondary)
-            }
+            Text("Add your provider key in Cloud providers to unlock a cloud engine.")
+                .font(.caption).foregroundStyle(.secondary)
 
             Divider().padding(.vertical, 4)
 
@@ -102,14 +119,19 @@ private struct DictationPane: View {
                 Text("Language")
                 Spacer()
                 if coordinator.settings.engine.needsLocale {
-                    Picker("", selection: Binding(
-                        get: { coordinator.settings.locale.language.languageCode?.identifier ?? coordinator.settings.locale.identifier },
-                        set: { code in
-                            if let choice = coordinator.languageChoices.first(where: { $0.language.languageCode?.identifier == code }) {
-                                coordinator.select(locale: choice)
+                    Picker(
+                        "",
+                        selection: Binding(
+                            get: {
+                                coordinator.settings.locale.language.languageCode?.identifier ?? coordinator.settings.locale.identifier
+                            },
+                            set: { code in
+                                if let choice = coordinator.languageChoices.first(where: { $0.language.languageCode?.identifier == code }) {
+                                    coordinator.select(locale: choice)
+                                }
                             }
-                        }
-                    )) {
+                        )
+                    ) {
                         ForEach(coordinator.languageChoices, id: \.identifier) { locale in
                             Text(locale.languageDisplayName).tag(locale.language.languageCode?.identifier ?? locale.identifier)
                         }
@@ -124,7 +146,7 @@ private struct DictationPane: View {
             Divider().padding(.vertical, 4)
 
             Text("PERMISSIONS").font(.caption.bold()).foregroundStyle(.secondary)
-            PermissionsRows()
+            PermissionsRows(coordinator: coordinator)
         }
     }
 }
@@ -186,29 +208,6 @@ private struct Tag: View {
     }
 }
 
-private struct PermissionsRows: View {
-    @State private var report = Permissions.check()
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            row("Microphone", granted: report.microphone, pane: .microphone)
-            row("Accessibility", granted: report.accessibility, pane: .accessibility)
-            row("Input Monitoring", granted: report.inputMonitoring, pane: .inputMonitoring)
-        }
-        .onAppear { report = Permissions.check() }
-    }
-
-    private func row(_ name: String, granted: Bool, pane: PermissionPane) -> some View {
-        HStack {
-            Image(systemName: granted ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(granted ? Color.green : Color.orange)
-            Text(name)
-            Spacer()
-            if !granted { Button("Open Settings") { Permissions.openSettings(pane) } }
-        }
-    }
-}
-
 // MARK: - Dictionary
 
 private struct DictionaryPane: View {
@@ -220,7 +219,11 @@ private struct DictionaryPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            PaneHeader(title: "Dictionary", subtitle: "Names and jargon, spelled your way. Entries are only ever added by you. Terms guide cleanup (Style Light or Full); rewrites always apply.")
+            PaneHeader(
+                title: "Dictionary",
+                subtitle:
+                    "Names and jargon, spelled your way. Entries are only ever added by you. Terms guide cleanup (Style Light or Full); rewrites always apply."
+            )
 
             HStack(spacing: 8) {
                 TextField("word or phrase", text: $newFrom).textFieldStyle(.roundedBorder)
@@ -311,16 +314,21 @@ private struct StylePane: View {
     private static let sample = "hey um so send the, send the invoice by friday and uh maybe cc sara"
 
     var body: some View {
+        let _ = coordinator.keyStatuses
         VStack(alignment: .leading, spacing: 16) {
             PaneHeader(title: "Style", subtitle: "How much cleanup every dictation gets, and which model does it.")
-            Toggle(isOn: Binding(
-                get: { coordinator.settings.fieldContextEnabled },
-                set: { coordinator.set(fieldContextEnabled: $0) }
-            )) {
+            Toggle(
+                isOn: Binding(
+                    get: { coordinator.settings.fieldContextEnabled },
+                    set: { coordinator.set(fieldContextEnabled: $0) }
+                )
+            ) {
                 VStack(alignment: .leading) {
                     Text("Field context")
-                    Text("Cleanup reads the text around your cursor as terminology reference. On-device only — never uploaded, never stored. No effect when Style is Off.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text(
+                        "Cleanup reads the text around your cursor as terminology reference. On-device only — never uploaded, never stored. No effect when Style is Off."
+                    )
+                    .font(.caption).foregroundStyle(.secondary)
                 }
             }
 
@@ -355,8 +363,9 @@ private struct StylePane: View {
                 ) { coordinator.set(polishEngine: .onDevice) }
                 CleanupCard(
                     title: OpenRouterTranscriber.keyAvailable ? "Cloud (OpenRouter)" : "Cloud (OpenRouter) — needs key",
-                    blurb: "Gemini 3.7 Flash. Dense, structured rewrites of long dictations. Sends the transcript and your dictionary terms, never field context. About a cent per long dictation.",
-                    example: "OPENROUTER_API_KEY in keys.env",
+                    blurb:
+                        "Gemini 3.7 Flash. Dense, structured rewrites of long dictations. Sends the transcript and your dictionary terms, never field context. About a cent per long dictation.",
+                    example: "add your key in Cloud providers",
                     selected: coordinator.settings.polishEngine == .openRouter
                 ) { if OpenRouterTranscriber.keyAvailable { coordinator.set(polishEngine: .openRouter) } }
             }
@@ -366,7 +375,9 @@ private struct StylePane: View {
             Text("TONE FOLLOWS THE APP").font(.caption.bold()).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 6) {
                 ForEach([WritingStyle.chat, .email, .code, .markdown], id: \.rawValue) { style in
-                    styleRow(style.rawValue.capitalized, StyleInference.appNames(for: style).joined(separator: ", "), StyleInference.effect(of: style))
+                    styleRow(
+                        style.rawValue.capitalized, StyleInference.appNames(for: style).joined(separator: ", "),
+                        StyleInference.effect(of: style))
                 }
                 styleRow("Plain", "everything else", StyleInference.effect(of: .plain))
             }
@@ -429,10 +440,12 @@ private struct HistoryPane: View {
             PaneHeader(title: "History", subtitle: "The trash of dictation — whatever didn't land is still here. Plain file, local, yours.")
 
             HStack {
-                Toggle("Keep history", isOn: Binding(
-                    get: { coordinator.settings.historyEnabled },
-                    set: { coordinator.set(historyEnabled: $0) }
-                ))
+                Toggle(
+                    "Keep history",
+                    isOn: Binding(
+                        get: { coordinator.settings.historyEnabled },
+                        set: { coordinator.set(historyEnabled: $0) }
+                    ))
                 Spacer()
                 Button("Clear all", role: .destructive) { coordinator.clearHistory() }
                     .disabled(coordinator.history.records.isEmpty)
@@ -455,10 +468,18 @@ private struct HistoryPane: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button { coordinator.copy(record: record) } label: { Image(systemName: "doc.on.doc") }
-                            .buttonStyle(.plain).foregroundStyle(.secondary)
-                        Button { coordinator.deleteHistory(record: record) } label: { Image(systemName: "trash") }
-                            .buttonStyle(.plain).foregroundStyle(.secondary)
+                        Button {
+                            coordinator.copy(record: record)
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                        }
+                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                        Button {
+                            coordinator.deleteHistory(record: record)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.plain).foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     Divider()

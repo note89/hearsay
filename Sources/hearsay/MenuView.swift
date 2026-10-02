@@ -8,11 +8,17 @@ struct MenuView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Button("Open hearsay…") { openSettingsWindow() }
+        Button("Settings…") { openSettingsWindow() }
+            .keyboardShortcut(",")
         Divider()
         Text(statusLine)
+        Button(coordinator.settings.dictationPaused ? "Resume dictation" : "Pause dictation") {
+            coordinator.set(dictationPaused: !coordinator.settings.dictationPaused)
+        }
         if let timing = coordinator.lastTiming {
-            Text("last: \(timing.transcribe.milliseconds) ms transcribe · \(timing.polish.milliseconds) ms polish · \(timing.insert.milliseconds) ms insert")
+            Text(
+                "last: \(timing.transcribe.milliseconds) ms transcribe · \(timing.polish.milliseconds) ms polish · \(timing.insert.milliseconds) ms insert"
+            )
         }
         Divider()
         if coordinator.settings.engine.needsLocale {
@@ -30,9 +36,9 @@ struct MenuView: View {
         if let last = coordinator.history.records.first {
             Button("Copy last dictation") { coordinator.copy(record: last) }
         }
-        if !allPermissionsGranted {
+        if !coordinator.permissionReport.allGranted {
             Divider()
-            Button("⚠ Fix permissions…") { openSettingsWindow() }
+            Button("Set up permissions…") { openSettingsWindow() }
         }
         Divider()
         Button("Relaunch") { Relaunch.now() }
@@ -40,19 +46,18 @@ struct MenuView: View {
             .keyboardShortcut("q")
     }
 
-    private var allPermissionsGranted: Bool {
-        let report = Permissions.check()
-        return report.microphone && report.accessibility && report.inputMonitoring
-    }
-
     private func openSettingsWindow() {
+        coordinator.refreshPermissions()
         openWindow(id: "settings")
         NSApp.activate(ignoringOtherApps: true)
     }
 
     private var statusLine: String {
+        if coordinator.settings.dictationPaused { return "dictation paused" }
+        if !coordinator.permissionReport.microphone { return "allow microphone in Settings to dictate" }
         switch coordinator.gesture {
-        case .denied: return "Input Monitoring denied — grant it, then Relaunch"
+        case .denied: return "enable Input Monitoring in Settings"
+        case .failed: return "shortcut unavailable — retrying"
         case .stopped: return "starting…"
         case .listening: break
         }
@@ -64,7 +69,8 @@ struct MenuView: View {
         }
         switch coordinator.phase {
         case .idle, .settled:
-            return coordinator.bakeoffPaneVisible ? "bake-off pane open — dictating into it scores" : "hold fn+shift to dictate"
+            return coordinator.bakeoffPaneVisible
+                ? "bake-off pane open — dictating into it scores" : "hold \(coordinator.settings.shortcut.label) to dictate"
         case .listening: return "listening…"
         case .finishing(_, let step): return "\(step.label)…"
         }

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import Utterance
 
 enum PolishMode: String {
     case off
@@ -24,9 +25,19 @@ final class Settings {
         static let fieldContext = "fieldContextEnabled"
         static let raceExclusions = "raceExclusions"
         static let polishEngine = "polishEngine"
+        static let shortcut = "holdShortcut"
+        static let paused = "dictationPaused"
     }
 
     private static let defaultLocale = "en-US"
+
+    var shortcut: ModifierChord {
+        didSet { UserDefaults.standard.set(shortcut.rawValue, forKey: Key.shortcut) }
+    }
+
+    var dictationPaused: Bool {
+        didSet { UserDefaults.standard.set(dictationPaused, forKey: Key.paused) }
+    }
 
     var locale: Locale {
         didSet { UserDefaults.standard.set(locale.identifier, forKey: Key.locale) }
@@ -68,6 +79,8 @@ final class Settings {
 
     init() {
         let defaults = UserDefaults.standard
+        shortcut = defaults.string(forKey: Key.shortcut).flatMap(ModifierChord.init(rawValue:)) ?? .fnShift
+        dictationPaused = defaults.bool(forKey: Key.paused)
         locale = Locale(identifier: defaults.string(forKey: Key.locale) ?? Self.defaultLocale)
         polish = PolishMode(rawValue: defaults.string(forKey: Key.polish) ?? "") ?? .full
         polishEngine = PolishEngine(rawValue: defaults.string(forKey: Key.polishEngine) ?? "") ?? .onDevice
