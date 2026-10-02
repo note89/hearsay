@@ -4,7 +4,7 @@ import Testing
 @testable import Overlay
 
 struct OverlayDockTests {
-    private let size = CGSize(width: 460, height: 76)
+    private let size = OverlayLayout.panelSize
     private let area = CGRect(x: -1920, y: 30, width: 1920, height: 1050)
 
     @Test
@@ -37,7 +37,7 @@ struct OverlayDockTests {
 
     @Test
     func testClampingHandlesDisplaysSmallerThanTheBar() {
-        let smallArea = CGRect(x: 500, y: 200, width: 300, height: 50)
+        let smallArea = CGRect(x: 500, y: 200, width: 90, height: 50)
         let frame = OverlayGeometry.frame(size: size, dock: .standard, in: smallArea, placement: .raised)
         #expect(frame == smallArea)
     }
@@ -57,8 +57,8 @@ struct OverlayDockTests {
         let bar = CGRect(x: area.minX + 20, y: area.midY - size.height / 2, width: size.width, height: size.height)
         let pointer = CGPoint(x: area.minX + 25, y: area.midY)
         let dock = OverlayDock.dropping(bar, at: pointer, in: area)
-        #expect(dock.edge == .left)
-        #expect(dock.along == 0.5)
+        #expect(dock?.edge == .left)
+        #expect(dock?.along == 0.5)
     }
 
     @Test
@@ -76,6 +76,52 @@ struct OverlayDockTests {
         let frame = OverlayGeometry.frame(size: size, dock: dock, in: resized, placement: .bottom)
         #expect(frame.midY == resized.minY + resized.height * 0.75)
         #expect(frame.maxX == resized.maxX - OverlayGeometry.sideGap)
+    }
+
+    @Test
+    func testReleasingOutsideADropZoneKeepsTheSavedDock() {
+        let bar = CGRect(x: area.midX, y: area.midY, width: size.width, height: size.height)
+        #expect(OverlayDock.dropping(bar, at: CGPoint(x: area.midX, y: area.midY), in: area) == nil)
+        #expect(OverlayDock.dropping(bar, at: CGPoint(x: area.midX, y: area.maxY), in: area) == nil)
+    }
+
+    @Test
+    func testVisibleTargetsMatchDropDetectionOnOffsetAndSmallDisplays() {
+        for display in [area, CGRect(x: 1728, y: -200, width: 1440, height: 900), CGRect(x: -300, y: -50, width: 300, height: 180)] {
+            for edge in OverlayDock.Edge.allCases {
+                let zone = OverlayDropZones.frame(for: edge, in: display)
+                #expect(display.contains(zone))
+                #expect(OverlayDropZones.edge(at: CGPoint(x: zone.midX, y: zone.midY), in: display) == edge)
+                for other in OverlayDock.Edge.allCases where other != edge {
+                    #expect(!zone.intersects(OverlayDropZones.frame(for: other, in: display)))
+                }
+            }
+        }
+    }
+
+    @Test
+    func testTargetDrawingMatchesHitTestingAcrossDisplayOrigins() async {
+        await MainActor.run {
+            let screen = CGRect(x: -1920, y: -200, width: 1920, height: 1080)
+            let visible = CGRect(x: -1920, y: -170, width: 1920, height: 1020)
+            let model = OverlayDropTargetModel(screenFrame: screen, visibleFrame: visible)
+            for edge in OverlayDock.Edge.allCases {
+                let drawn = model.localFrame(for: edge)
+                let pointer = CGPoint(x: screen.minX + drawn.midX, y: screen.maxY - drawn.midY)
+                #expect(OverlayDropZones.edge(at: pointer, in: visible) == edge)
+            }
+        }
+    }
+
+    @Test
+    func testCompactBarFitsAtEveryDockPosition() {
+        for edge in OverlayDock.Edge.allCases {
+            for along in [CGFloat(0), 0.5, 1] {
+                let frame = OverlayGeometry.frame(size: size, dock: OverlayDock(edge: edge, along: along), in: area, placement: .bottom)
+                #expect(area.contains(frame))
+                #expect(frame.size == size)
+            }
+        }
     }
 
     @Test

@@ -2,7 +2,7 @@ import Foundation
 
 /// The screen edge and normalized position where the dictation bar was dropped.
 struct OverlayDock: Equatable {
-    enum Edge: String {
+    enum Edge: String, CaseIterable {
         case bottom
         case left
         case right
@@ -18,23 +18,37 @@ struct OverlayDock: Equatable {
         self.along = along.isFinite ? min(max(along, 0), 1) : 0.5
     }
 
-    static func dropping(_ bar: CGRect, at pointer: CGPoint, in area: CGRect) -> OverlayDock {
-        let bottom = abs(pointer.y - area.minY)
-        let left = abs(pointer.x - area.minX)
-        let right = abs(area.maxX - pointer.x)
-        let edge: Edge
-        if bottom <= min(left, right) {
-            edge = .bottom
-        } else if left <= right {
-            edge = .left
-        } else {
-            edge = .right
-        }
+    static func dropping(_ bar: CGRect, at pointer: CGPoint, in area: CGRect) -> OverlayDock? {
+        guard let edge = OverlayDropZones.edge(at: pointer, in: area) else { return nil }
         let along =
             edge == .bottom
             ? (bar.midX - area.minX) / max(area.width, 1)
             : (bar.midY - area.minY) / max(area.height, 1)
         return OverlayDock(edge: edge, along: along)
+    }
+}
+
+enum OverlayLayout {
+    static let pillSize = CGSize(width: 109, height: 40)
+    static let panelSize = CGSize(width: pillSize.width + 24, height: pillSize.height + 26)
+}
+
+enum OverlayDropZones {
+    static func frame(for edge: OverlayDock.Edge, in area: CGRect) -> CGRect {
+        let inset = min(24, min(area.width, area.height) * 0.04)
+        switch edge {
+        case .bottom:
+            let size = CGSize(width: min(320, area.width * 0.4), height: min(104, area.height * 0.18))
+            return CGRect(x: area.midX - size.width / 2, y: area.minY + inset, width: size.width, height: size.height)
+        case .left, .right:
+            let size = CGSize(width: min(156, area.width * 0.2), height: min(280, area.height * 0.5))
+            let x = edge == .left ? area.minX + inset : area.maxX - inset - size.width
+            return CGRect(x: x, y: area.midY - size.height / 2, width: size.width, height: size.height)
+        }
+    }
+
+    static func edge(at pointer: CGPoint, in area: CGRect) -> OverlayDock.Edge? {
+        OverlayDock.Edge.allCases.first { frame(for: $0, in: area).contains(pointer) }
     }
 }
 

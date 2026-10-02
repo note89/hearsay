@@ -11,8 +11,7 @@ struct OverlayDragActions {
 struct OverlayView: View {
     let model: OverlayModel
     let dragActions: OverlayDragActions
-
-    private static let pillHeight: CGFloat = 50
+    @State private var showingDetails = false
 
     private var pillOpacity: Double {
         if case .settled(_, .ok) = model.content { return 0.72 }
@@ -20,23 +19,23 @@ struct OverlayView: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 6) {
             DragGrip(actions: dragActions)
-                .frame(width: 22, height: 30)
+                .frame(width: 14, height: 28)
             Rectangle()
                 .fill(Color.white.opacity(0.14))
-                .frame(width: 1, height: 20)
+                .frame(width: 1, height: 16)
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .font(.system(size: 13, weight: .medium, design: .rounded))
-        .padding(.horizontal, 14)
-        .frame(height: Self.pillHeight)
-        .frame(maxWidth: OverlayPanel.size.width - 24)
+        .font(.system(size: 11, weight: .medium, design: .rounded))
+        .padding(.horizontal, 10)
+        .frame(width: OverlayLayout.pillSize.width, height: OverlayLayout.pillSize.height)
         .background(Capsule().fill(Color.black.opacity(pillOpacity)))
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
         .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: model.content) { showingDetails = false }
     }
 
     @ViewBuilder private var content: some View {
@@ -44,58 +43,54 @@ struct OverlayView: View {
         case .hidden:
             EmptyView()
         case .preview:
-            HStack(spacing: 10) {
+            HStack(spacing: 6) {
                 Image(systemName: "mic.fill")
-                    .font(.system(size: 16))
                     .foregroundStyle(.white.opacity(0.8))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Move your dictation bar").foregroundStyle(.white)
-                    Text("Drag the grip to a screen edge")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.6))
+                Text("Move").foregroundStyle(.white.opacity(0.7))
+            }
+            .help("Drag the grip to the bottom, left or right drop zone. Press Escape to cancel.")
+        case .listening(let partial):
+            HStack(spacing: 5) {
+                sessionIcon
+                Waveform(levels: model.levels)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Listening\(model.badge.map { ", \($0)" } ?? "")\(partial.isEmpty ? "" : ": \(partial)")")
+            .help(partial.isEmpty ? "Listening\(model.badge.map { " · \($0)" } ?? "")" : partial)
+        case .working(let label):
+            HStack(spacing: 6) {
+                sessionIcon
+                ProgressView().controlSize(.mini).tint(.white)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
+            .help(label)
+        case .settled(let message, let tone):
+            Button {
+                showingDetails.toggle()
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: tone == .ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(tone == .ok ? Color.green : Color.orange)
+                    Text(tone == .ok ? "Done" : message.contains("copied") ? "Copy" : "Issue")
+                        .foregroundStyle(.white.opacity(tone == .ok ? 0.9 : 1))
                 }
             }
-        case .listening(let partial):
-            HStack(spacing: 10) {
-                privacyBadge
-                Waveform(levels: model.levels)
-                Text(partial.isEmpty ? "Listening…" : partial)
-                    .foregroundStyle(partial.isEmpty ? Color.white.opacity(0.6) : Color.white)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        case .working(let label):
-            HStack(spacing: 10) {
-                privacyBadge
-                ProgressView().controlSize(.small).tint(.white)
-                Text(label)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .lineLimit(1)
-            }
-        case .settled(let message, let tone):
-            HStack(spacing: 10) {
-                Image(systemName: tone == .ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(tone == .ok ? Color.green : Color.orange)
-                Text(message)
-                    .foregroundStyle(.white.opacity(tone == .ok ? 0.9 : 1))
-                    .lineLimit(tone == .ok ? 1 : 2)
+            .buttonStyle(.plain)
+            .accessibilityLabel(message)
+            .help(message)
+            .popover(isPresented: $showingDetails, arrowEdge: .bottom) {
+                Text(message).font(.callout).padding(16).frame(maxWidth: 280)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
-    @ViewBuilder private var privacyBadge: some View {
-        if let badge = model.badge {
-            Text(badge)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.orange)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .overlay(Capsule().strokeBorder(Color.orange.opacity(0.6), lineWidth: 1))
-                .fixedSize()
-                .accessibilityLabel("Session mode: \(badge)")
-        }
+    private var sessionIcon: some View {
+        Image(systemName: model.badge == nil ? "mic.fill" : model.badge?.hasPrefix("racing") == true ? "flag.checkered" : "cloud.fill")
+            .font(.system(size: 12))
+            .foregroundStyle(model.badge == nil ? Color.white.opacity(0.85) : Color.orange)
+            .help(model.badge ?? "On-device dictation")
     }
 }
 
@@ -178,14 +173,14 @@ private final class DragGripView: NSView {
 
 private struct Waveform: View {
     let levels: [Float]
-    private static let barHeight: CGFloat = 22
+    private static let barHeight: CGFloat = 18
 
     var body: some View {
         HStack(alignment: .center, spacing: 2) {
             ForEach(levels.indices, id: \.self) { index in
                 RoundedRectangle(cornerRadius: 1.5)
                     .fill(Color.white.opacity(0.9))
-                    .frame(width: 3, height: max(3, CGFloat(levels[index]) * Self.barHeight))
+                    .frame(width: 2.5, height: max(3, CGFloat(levels[index]) * Self.barHeight))
             }
         }
         .frame(height: Self.barHeight)

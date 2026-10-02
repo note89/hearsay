@@ -75,8 +75,11 @@ struct GeneralPane: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 Label("Floating bar", systemImage: "rectangle.bottomhalf.inset.filled").font(.headline)
-                Text("Drag the grip to move the bar. Its position is remembered and adapts to the display, including full-screen apps.")
-                    .font(.callout).foregroundStyle(.secondary)
+                Text(
+                    "Drag the grip to reveal the bottom, left and right drop zones. Drop into a zone to dock the bar, or press Esc to cancel. "
+                        + "Its position is remembered, including in full-screen apps."
+                )
+                .font(.callout).foregroundStyle(.secondary)
                 HStack {
                     Button(coordinator.barPreviewVisible ? "Done positioning" : "Show bar preview") {
                         if coordinator.barPreviewVisible { coordinator.endBarPreview() } else { coordinator.previewBar() }

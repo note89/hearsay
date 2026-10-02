@@ -39,7 +39,7 @@ enum OverlayContent: Equatable {
 
 @MainActor @Observable
 final class OverlayModel {
-    static let barCount = 22
+    static let barCount = 8
 
     var content: OverlayContent = .hidden
     var badge: String?
@@ -77,7 +77,7 @@ private final class FirstMouseHostingView<Content: View>: NSHostingView<Content>
 /// A draggable dictation bar that leaves keyboard focus with the app receiving text.
 @MainActor
 public final class OverlayPanel {
-    static let size = NSSize(width: 460, height: 76)
+    static let size = OverlayLayout.panelSize
     private static let fadeOut: TimeInterval = 0.22
 
     private enum Visibility {
@@ -97,6 +97,8 @@ public final class OverlayPanel {
     private var placement: OverlayPlacement = .bottom
     private var visibility = Visibility.hidden
     private var drag: Drag?
+    private let dropTargets = OverlayDropTargets()
+    private var escapeMonitors: [Any] = []
     private var screenObserver: NSObjectProtocol?
 
     public init(defaults: UserDefaults = .standard) {
@@ -109,7 +111,7 @@ public final class OverlayPanel {
             defer: false
         )
         panel.isFloatingPanel = true
-        panel.level = .statusBar
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -131,12 +133,16 @@ public final class OverlayPanel {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.relayout() }
+            Task { @MainActor [weak self] in
+                self?.finishDragging()
+                self?.relayout()
+            }
         }
     }
 
     deinit {
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+        for monitor in escapeMonitors { NSEvent.removeMonitor(monitor) }
     }
 
     public func render(_ state: OverlayState) {
@@ -182,12 +188,31 @@ public final class OverlayPanel {
     public func resetPosition() {
         dock = .standard
         dockStore.save(dock)
-        drag = nil
+        finishDragging()
         relayout()
     }
 
     func dragBegan(at pointer: NSPoint) {
         drag = Drag(pointer: pointer, origin: panel.frame.origin)
+        dropTargets.show(at: pointer)
+        panel.orderFrontRegardless()
+        let cancel: (NSEvent) -> Void = { [weak self] event in
+            guard event.keyCode == 53 else { return }
+            self?.cancelDragging()
+        }
+        if let monitor = NSEvent.addLocalMonitorForEvents(
+            matching: .keyDown,
+            handler: { [weak self] event in
+                let cancelling = event.keyCode == 53 && self?.drag != nil
+                cancel(event)
+                return cancelling ? nil : event
+            })
+        {
+            escapeMonitors.append(monitor)
+        }
+        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: cancel) {
+            escapeMonitors.append(monitor)
+        }
     }
 
     func dragMoved(to pointer: NSPoint) {
@@ -199,16 +224,30 @@ public final class OverlayPanel {
         let frame = NSRect(origin: origin, size: Self.size)
         let area = Self.screen(at: pointer)?.visibleFrame
         panel.setFrame(area.map { OverlayGeometry.clamping(frame, to: $0) } ?? frame, display: true)
+        dropTargets.update(at: pointer)
     }
 
     func dragEnded(at pointer: NSPoint) {
         guard drag != nil else { return }
-        drag = nil
-        if let screen = Self.screen(at: pointer) {
+        finishDragging()
+        if let screen = Self.screen(at: pointer), let dropped = OverlayDock.dropping(panel.frame, at: pointer, in: screen.visibleFrame) {
             visibility = .shown(displayID: Self.displayID(of: screen))
-            dock = OverlayDock.dropping(panel.frame, at: pointer, in: screen.visibleFrame)
+            dock = dropped
             dockStore.save(dock)
         }
+        relayout(animated: true)
+    }
+
+    private func finishDragging() {
+        drag = nil
+        dropTargets.hide()
+        for monitor in escapeMonitors { NSEvent.removeMonitor(monitor) }
+        escapeMonitors.removeAll()
+    }
+
+    private func cancelDragging() {
+        guard drag != nil else { return }
+        finishDragging()
         relayout(animated: true)
     }
 
@@ -226,7 +265,7 @@ public final class OverlayPanel {
 
     private func hide() {
         visibility = .hidden
-        drag = nil
+        finishDragging()
         let panel = panel
         NSAnimationContext.runAnimationGroup(
             { context in
