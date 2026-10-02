@@ -21,7 +21,8 @@ MINIMUM_OS="$(/usr/libexec/PlistBuddy -c 'Print LSMinimumSystemVersion' "$PLIST"
 [[ $(lipo -archs "$APP/Contents/MacOS/hearsay") == arm64 ]] || die "the release executable must be arm64"
 codesign --verify --strict --deep --verbose=2 "$APP"
 SIGNATURE="$(codesign --display --verbose=4 "$APP" 2>&1)"
-[[ $SIGNATURE == *'flags='*'(runtime)'* ]] || die "hardened runtime is missing"
+CODE_FLAGS="$(sed -n 's/^CodeDirectory .* flags=0x\([[:xdigit:]]*\).*/\1/p' <<< "$SIGNATURE")"
+[[ -n $CODE_FLAGS ]] && (( (16#$CODE_FLAGS & 0x10000) != 0 )) || die "hardened runtime is missing"
 
 ENTITLEMENTS="$(mktemp)"
 trap 'rm -f "$ENTITLEMENTS"' EXIT

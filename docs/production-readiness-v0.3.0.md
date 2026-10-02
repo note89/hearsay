@@ -2,7 +2,7 @@
 
 **Feature:** ScreenSnap-style production treatment for Hearsay: movable bar, native options, Apple signing and notarization, publication, and Homebrew installation.
 **Date:** 2026-10-02
-**Iterations:** 2
+**Iterations:** 3
 **Exit reason:** clean
 
 ## Plan summary
@@ -22,6 +22,7 @@ Keep the native macOS app and its offline default. Add remembered, focus-preserv
 |---|---:|---:|---|
 | 1 | 3 | 3 | Fixed workflow selection, published-asset replacement, and narrow-display cropping. |
 | 2 | 0 | 0 | Independent final validation clean. |
+| 3 | 1 | 0 | CI caught combined ad-hoc/runtime flags; the verifier now checks the runtime bit and independent review is clean. |
 
 Release CI selection now includes the exact commit and creation time after the tag push starts. Platform uploads require a draft containing the expected native archive and checksum. The overlay accepts its hosting panel's size. Review also checked microphone denial, pause/release, deferred engine changes, shortcut retry/replacement, shutdown cancellation, credential fallback, and preview/fade behavior.
 
@@ -32,6 +33,7 @@ Release CI selection now includes the exact commit and creation time after the t
 - 18 Rust workspace tests passed; the updated Cargo lock file is valid with `--locked`.
 - All 22 changed Swift files passed strict formatter lint; shell syntax, plist lint, workflow YAML parsing, and whitespace checks passed.
 - Optimized arm64 app compiled with the hardened runtime and microphone entitlement, without compiler warnings.
+- Release verification accepts Developer ID and ad-hoc hardened signatures and rejects signatures without the runtime bit. GitHub's first native CI run exposed the combined-flag parsing issue; this was corrected before publication.
 - Apple notarization accepted submission `08a3a3bc-20e6-49f5-b7d7-9ac19d38ffb4`; ticket stapling and validation succeeded. Gatekeeper reported `Notarized Developer ID`.
 - Native process smoke reached the main event loop and prepared the English on-device model. Computer-use automation could not attach to the accessory app, so physical dragging and live microphone-to-caret dictation were not automated.
 
