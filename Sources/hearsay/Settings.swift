@@ -1,19 +1,7 @@
 import Foundation
 import Observation
+import Pipeline
 import Utterance
-
-enum PolishMode: String {
-    case off
-    case light
-    case full
-}
-
-/// Which model does the cleanup. On-device is private and free; the cloud model is stronger on long
-/// rewrites and never receives field context.
-enum PolishEngine: String {
-    case onDevice
-    case openRouter
-}
 
 @MainActor @Observable
 final class Settings {

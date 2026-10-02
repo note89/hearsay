@@ -4,9 +4,6 @@ import Foundation
 public struct PolishedText: Equatable, Sendable {
     public let text: String
 
-    init(text: String) {
-        self.text = text
-    }
 }
 
 /// How far polish may go. "Off" is the caller not calling.
@@ -17,7 +14,7 @@ public enum PolishIntensity: Sendable {
     case full
 }
 
-public enum WritingStyle: String, Sendable {
+public enum WritingStyle: String, Codable, Sendable {
     case plain
     case chat
     case email

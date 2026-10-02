@@ -64,6 +64,8 @@ struct MenuView: View {
         switch coordinator.engine {
         case .preparing: return "preparing…"
         case .downloadingModel(let locale): return "downloading \(locale.displayName) model…"
+        case .needsDownload(let model): return "download \(model.label) in Settings → Dictation"
+        case .loadingLocalModel(let model): return "loading \(model.label)…"
         case .failed(let message): return "engine failed: \(message)"
         case .ready: break
         }

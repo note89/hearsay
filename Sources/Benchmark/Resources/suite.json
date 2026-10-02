@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "name": "My dictation benchmark",
+  "vocabulary": ["hearsay", "Wispr Flow", "Keycloak", "PostgreSQL", "parseTranscript"],
+  "rewrites": [{"from": "mprox", "to": "mprocs"}],
+  "cases": [
+    {
+      "id": "numbers", "audio": "audio/numbers.wav", "locale": "en-US", "style": "plain",
+      "spoken": "The invoice totals one thousand two hundred fifty euros plus twenty three percent VAT and it is due on the fourteenth of October.",
+      "expected": "The invoice totals €1,250 plus 23% VAT and is due on 14 October."
+    },
+    {
+      "id": "correction", "audio": "audio/correction.wav", "locale": "en-US", "style": "chat",
+      "spoken": "Um send the report no the invoice to Alex on Tuesday actually make that Thursday morning.",
+      "expected": "Send the invoice to Alex on Thursday morning"
+    },
+    {
+      "id": "technical", "audio": "audio/technical.wav", "locale": "en-US", "style": "code",
+      "spoken": "Refactor the parseTranscript function and check the Keycloak integration. The PostgreSQL query takes two hundred fifty milliseconds and the p ninety nine latency should stay below five hundred milliseconds.",
+      "expected": "Refactor the parseTranscript function and check the Keycloak integration. The PostgreSQL query takes 250ms, and the p99 latency should stay below 500ms."
+    },
+    {
+      "id": "list", "audio": "audio/list.wav", "locale": "en-US", "style": "markdown",
+      "spoken": "Before we ship we need three things. First fix the login. Second test the microphone. Third update the documentation.",
+      "expected": "Before we ship, we need three things:\n- Fix the login.\n- Test the microphone.\n- Update the documentation."
+    },
+    {
+      "id": "email", "audio": "audio/email.wav", "locale": "en-US", "style": "email",
+      "spoken": "Hi Alex thanks for the update. I think we should move the meeting to next week because the prototype is not ready yet. Could you send me the latest numbers before Friday? Thanks Nils.",
+      "expected": "Hi Alex,\n\nThanks for the update. We should move the meeting to next week because the prototype is not ready yet. Could you send me the latest numbers before Friday?\n\nThanks,\nNils"
+    },
+    {
+      "id": "mixed", "audio": "audio/mixed.wav", "locale": "sv-SE", "style": "chat",
+      "spoken": "Kan du kolla den där pull requesten och fixa deploymenten innan lunch? Jag tror att det är något med cache invalidation.",
+      "expected": "Kan du kolla den där pull requesten och fixa deploymenten innan lunch? Jag tror att det är något med cache invalidation."
+    },
+    {
+      "id": "swedish", "audio": "audio/swedish.wav", "locale": "sv-SE", "style": "plain",
+      "spoken": "Jag vill att vi testar hela flödet igen, inte bara transkriberingen. Resultatet ska ha rätt skiljetecken och behålla det jag faktiskt menade.",
+      "expected": "Jag vill att vi testar hela flödet igen, inte bara transkriberingen. Resultatet ska ha rätt skiljetecken och behålla det jag faktiskt menade."
+    },
+    {
+      "id": "portuguese", "audio": "audio/portuguese.wav", "locale": "pt-PT", "style": "chat",
+      "spoken": "Olá, podemos mudar a reunião para quinta-feira às três da tarde? Preciso de confirmar os detalhes primeiro.",
+      "expected": "Olá, podemos mudar a reunião para quinta-feira às 15h? Preciso de confirmar os detalhes primeiro."
+    },
+    {
+      "id": "long-request", "audio": "audio/long-request.wav", "locale": "en-US", "style": "plain",
+      "spoken": "It would be nice if we could make a benchmark that can be rerun automatically. Pre recorded messages of me saying a bunch of stuff and then we measure. That way we can tweak the whole pipeline to get more like Wispr Flow which has good output mostly. I want to compare the raw transcript and the cleaned up output separately so we know which part got better. Also please keep all the recordings on this machine and let me save a baseline before changing anything. Super go ahead.",
+      "expected": "It would be nice to make a benchmark that can be rerun automatically using prerecorded messages of me saying a range of things. We can then tweak the whole pipeline to get closer to Wispr Flow, which usually produces good output.\n\nI want to compare the raw transcript and the cleaned output separately so we know which part improved. Please keep all recordings on this machine and let me save a baseline before changing anything. Super, go ahead."
+    }
+  ]
+}

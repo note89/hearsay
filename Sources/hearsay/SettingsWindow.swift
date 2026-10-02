@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import History
 import Lexicon
+import Pipeline
 import Polish
 import SwiftUI
 import Transcription
@@ -35,6 +36,11 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 struct SettingsWindowView: View {
     let coordinator: Coordinator
     @State private var section: SettingsSection? = .general
+
+    init(coordinator: Coordinator, initialSection: SettingsSection = .general) {
+        self.coordinator = coordinator
+        _section = State(initialValue: initialSection)
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -95,21 +101,33 @@ private struct DictationPane: View {
                 title: "Dictation",
                 subtitle: "Hold \(coordinator.settings.shortcut.label) anywhere. Release, and the words land at your cursor.")
             if coordinator.activeEngine != coordinator.settings.engine {
-                Label(
-                    "\(coordinator.settings.engine.label) needs its API key — dictating with Apple on-device until it is added. Your choice is kept.",
-                    systemImage: "key"
-                )
-                .font(.callout).foregroundStyle(.orange)
+                if coordinator.settings.engine.requiredKey != nil && !coordinator.settings.engine.isAvailable {
+                    Label(
+                        "\(coordinator.settings.engine.label) needs its API key — dictating with \(coordinator.activeEngine.label) until it is added. Your choice is kept.",
+                        systemImage: "key"
+                    )
+                    .font(.callout).foregroundStyle(.orange)
+                } else {
+                    Text("\(coordinator.settings.engine.label) will be used after the current dictation finishes.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
             }
 
             Text("ENGINE").font(.caption.bold()).foregroundStyle(.secondary)
+            LocalModelComparisonView()
             ForEach(Engine.all, id: \.wireKey) { engineOption in
-                EngineCard(
-                    engine: engineOption,
-                    selected: coordinator.settings.engine == engineOption,
-                    select: { coordinator.select(engine: engineOption) }
-                )
+                if case .local(let model) = engineOption {
+                    LocalModelCard(model: model, coordinator: coordinator)
+                } else {
+                    EngineCard(
+                        engine: engineOption,
+                        selected: coordinator.settings.engine == engineOption,
+                        select: { coordinator.select(engine: engineOption) }
+                    )
+                }
             }
+            Text("Downloaded models run entirely on this Mac. Internet is needed only for the download; no account or API key is required.")
+                .font(.caption).foregroundStyle(.secondary)
             Text("Add your provider key in Cloud providers to unlock a cloud engine.")
                 .font(.caption).foregroundStyle(.secondary)
 
@@ -148,6 +166,98 @@ private struct DictationPane: View {
             Text("PERMISSIONS").font(.caption.bold()).foregroundStyle(.secondary)
             PermissionsRows(coordinator: coordinator)
         }
+    }
+}
+
+private struct LocalModelCard: View {
+    let model: LocalSpeechModel
+    let coordinator: Coordinator
+
+    private var selected: Bool { coordinator.settings.engine == .local(model) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Button {
+                    coordinator.select(engine: .local(model))
+                } label: {
+                    Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                        .foregroundStyle(selected ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(!coordinator.canSelect(.local(model)))
+                .accessibilityLabel("Use \(model.label)")
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(model.label).fontWeight(.semibold)
+                        Tag(text: "private", tone: .green)
+                    }
+                    Text(model.detail).font(.caption).foregroundStyle(.secondary)
+                    Text(ByteCountFormatter.string(fromByteCount: model.downloadBytes, countStyle: .file))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                action
+            }
+            LocalModelLanguagesView(model: model)
+            if selected {
+                switch coordinator.engine {
+                case .loadingLocalModel:
+                    HStack {
+                        ProgressView().controlSize(.small)
+                        Text("Loading model…").font(.caption)
+                    }
+                case .failed(let message):
+                    Text(message).font(.caption).foregroundStyle(.orange).textSelection(.enabled)
+                default: EmptyView()
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .quaternarySystemFill)))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(selected ? Color.accentColor : Color.clear, lineWidth: 1.5))
+    }
+
+    @ViewBuilder private var action: some View {
+        switch coordinator.localModels.state(of: model) {
+        case .notDownloaded:
+            Button("Download") { coordinator.download(model: model) }
+                .disabled(coordinator.localModels.isBusy)
+        case .downloading(let progress):
+            VStack(alignment: .trailing, spacing: 5) {
+                ProgressView(value: Double(progress.receivedBytes), total: Double(max(1, progress.totalBytes)))
+                    .frame(width: 130)
+                Text("\(Int(100 * Double(progress.receivedBytes) / Double(max(1, progress.totalBytes))))%")
+                    .font(.caption).monospacedDigit()
+                Button("Cancel") { coordinator.localModels.cancelDownload() }
+            }
+        case .installed:
+            HStack(spacing: 6) {
+                Button(selected ? "Selected" : "Use") { coordinator.select(engine: .local(model)) }
+                Menu {
+                    Button("Remove download", role: .destructive) { coordinator.remove(model: model) }
+                        .disabled(coordinator.sessionInFlight || coordinator.localModels.isBusy || isLoading)
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .accessibilityLabel("Manage \(model.label) download")
+            }
+        case .removing:
+            ProgressView().controlSize(.small)
+        case .failed(let message):
+            VStack(alignment: .trailing, spacing: 5) {
+                Text(message).font(.caption).foregroundStyle(.orange)
+                    .frame(maxWidth: 200, alignment: .trailing).textSelection(.enabled)
+                Button("Retry") { coordinator.download(model: model) }
+                    .disabled(coordinator.localModels.isBusy)
+            }
+        }
+    }
+
+    private var isLoading: Bool {
+        if case .loadingLocalModel = coordinator.engine { return true }
+        return false
     }
 }
 

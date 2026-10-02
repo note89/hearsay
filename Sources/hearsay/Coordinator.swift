@@ -7,35 +7,11 @@ import Insertion
 import Lexicon
 import Observation
 import Overlay
+import Pipeline
 import Polish
 import Transcription
 import Utterance
 import os
-
-/// Text bound for the target, with its provenance. Only the Coordinator unwraps this into the
-/// bare String that the Insertion mechanism takes.
-indirect enum InsertableText {
-    case polished(PolishedText, spoken: RawTranscript)
-    case raw(RawTranscript)
-    /// Dictionary rewrites applied over a polished or raw base — the base is kept, not flattened.
-    case rewritten(text: String, over: InsertableText)
-
-    var text: String {
-        switch self {
-        case .polished(let polished, _): return polished.text
-        case .raw(let raw): return raw.text
-        case .rewritten(let text, _): return text
-        }
-    }
-
-    var spoken: String {
-        switch self {
-        case .polished(_, let spoken): return spoken.text
-        case .raw(let raw): return raw.text
-        case .rewritten(_, let base): return base.spoken
-        }
-    }
-}
 
 /// The rules a session runs under, snapshotted at press. Later settings changes
 /// cannot affect a session in flight.
@@ -112,6 +88,8 @@ enum SessionOutcome {
 enum EngineStatus: Equatable {
     case preparing
     case downloadingModel(Locale)
+    case needsDownload(LocalSpeechModel)
+    case loadingLocalModel(LocalSpeechModel)
     case ready
     case failed(String)
 }
@@ -140,6 +118,13 @@ final class LiveSession {
     var rivalWatch: Task<RivalObservation, Never>?
     /// Key-up: every contender's clock starts here.
     var releasedAt: ContinuousClock.Instant?
+    let pressedAt = ContinuousClock.now
+
+    var transcriptionLimit: Duration {
+        guard let releasedAt else { return .seconds(15) }
+        // Local decoders need time proportional to the recording; a long dictation is not a failed model.
+        return max(.seconds(15), min(.seconds(300), releasedAt - pressedAt))
+    }
 
     init(token: UUID, rules: SessionRules, plan: SessionPlan, contenders: [Contender]) {
         self.token = token
@@ -182,6 +167,7 @@ final class Coordinator {
     private(set) var keyStatuses: [APIKeyProvider: APIKeyStatus] = [:]
     let launchAtLogin = LaunchAtLogin()
     let updater = Updater()
+    let localModels: LocalModelLibrary
     private(set) var availableLocales: [Locale] = []
     /// The engine sessions actually run on: the chosen one when its key is present, else Apple.
     /// The user's choice in Settings is never overwritten by availability.
@@ -190,21 +176,9 @@ final class Coordinator {
     /// One entry per language: the variant matching the user's region when the model list has it,
     /// else a canonical default. Regional model variants are mechanism, not a user choice.
     var languageChoices: [Locale] {
-        var byLanguage: [String: [Locale]] = [:]
-        for locale in availableLocales {
-            byLanguage[locale.language.languageCode?.identifier ?? locale.identifier, default: []].append(locale)
-        }
-        let userRegion = Locale.current.region?.identifier
-        let preferred = [
-            "en": "en_US", "pt": "pt_PT", "sv": "sv_SE", "de": "de_DE", "fr": "fr_FR", "es": "es_ES", "it": "it_IT", "nl": "nl_NL",
-            "zh": "zh_CN",
-        ]
-        return byLanguage.map { language, variants in
-            if let regional = variants.first(where: { $0.region?.identifier == userRegion }) { return regional }
-            if let canonical = preferred[language], let match = variants.first(where: { $0.identifier == canonical }) { return match }
-            return variants.sorted { $0.identifier < $1.identifier }[0]
-        }
-        .sorted { $0.languageDisplayName < $1.languageDisplayName }
+        let model: LocalSpeechModel?
+        if case .local(let selected) = settings.engine { model = selected } else { model = nil }
+        return SpeechLanguages.choices(for: model, availableLocales: availableLocales, userRegion: Locale.current.region?.identifier)
     }
     /// Set by the Bake-off pane's appear/disappear. Being in the pane IS bake-off mode.
     var bakeoffPaneVisible = false
@@ -216,15 +190,6 @@ final class Coordinator {
     private static let settleDisplay: Duration = .milliseconds(700)
     private static let warningDisplay: Duration = .milliseconds(2200)
     private static let bakeoffDisplay: Duration = .seconds(4)
-    private static let transcriptionTimeout: Duration = .seconds(15)
-    /// Cleanup gets a floor plus time per word: the on-device model rewrites at roughly 40 tokens per second.
-    private static let polishTimeoutFloor: Duration = .seconds(6)
-    private static let polishTimeoutPerWord: Duration = .milliseconds(70)
-    private static let polishTimeoutCap: Duration = .seconds(40)
-
-    private static func polishTimeout(forWords words: Int) -> Duration {
-        min(polishTimeoutFloor + polishTimeoutPerWord * words, polishTimeoutCap)
-    }
     private static let rivalTimeout: Duration = .seconds(8)
     private static let gestureRetry: Duration = .seconds(3)
     /// Field text handed to the on-device polish model as terminology reference; bounded for its context window.
@@ -244,16 +209,20 @@ final class Coordinator {
     @ObservationIgnored private var settleTask: Task<Void, Never>?
     @ObservationIgnored private var finishTask: Task<Void, Never>?
     @ObservationIgnored private var loadModelTask: Task<Void, Never>?
+    @ObservationIgnored private var loadModelToken: UUID?
     @ObservationIgnored private let clock = ContinuousClock()
     @ObservationIgnored private let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "hearsay", category: "session")
 
-    init() {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    init(directory: URL? = nil) {
+        let support =
+            directory
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("hearsay")
         KeyStore.configure(directory: support)
         history = HistoryStore(directory: support)
         dictionaryURL = support.appendingPathComponent("dictionary.txt")
         bakeoff = BakeoffStore(directory: support)
+        localModels = LocalModelLibrary(directory: support.appendingPathComponent("local-models", isDirectory: true))
         transcriber = SpeechAnalyzerTranscriber(locale: settings.locale)  // placeholder; bootstrap rebuilds from the persisted engine
     }
 
@@ -284,6 +253,8 @@ final class Coordinator {
         phase = .idle
         stopGesture()
         loadModelTask?.cancel()
+        loadModelToken = nil
+        localModels.stop()
         settleTask?.cancel()
         endBarPreview()
         overlay.render(.hidden)
@@ -376,8 +347,41 @@ final class Coordinator {
     }
 
     func select(engine chosen: Engine) {
+        if case .local(let model) = chosen, model.needsLocale,
+            model.languageCode(for: settings.locale) == nil
+        {
+            settings.locale = Locale(identifier: "en-US")
+        }
         settings.engine = chosen
         requestEngineRefresh()
+    }
+
+    func download(model: LocalSpeechModel) {
+        localModels.download(model) { [weak self] in
+            guard let self, self.isRunning, self.settings.engine == .local(model) else { return }
+            self.requestEngineRefresh()
+        }
+    }
+
+    func remove(model: LocalSpeechModel) {
+        guard !sessionInFlight, !localModels.isBusy else { return }
+        if case .loadingLocalModel = engine { return }
+        if settings.engine == .local(model) { engine = .needsDownload(model) }
+        localModels.remove(model) { [weak self] in
+            guard let self, self.isRunning, self.settings.engine == .local(model) else { return }
+            self.requestEngineRefresh()
+        }
+    }
+
+    func canSelect(_ choice: Engine) -> Bool {
+        if case .local(let model) = choice { return localModels.directory(for: model) != nil }
+        return choice.isAvailable
+    }
+
+    /// Keep one downloaded model resident; cloud and Apple contenders can still race it.
+    func canRace(_ choice: Engine) -> Bool {
+        if case .local = choice { return choice == activeEngine && canSelect(choice) && engine == .ready }
+        return choice.isAvailable
     }
 
     func set(polishEngine: PolishEngine) {
@@ -424,13 +428,34 @@ final class Coordinator {
 
     /// Resolves the chosen engine to the one sessions run on (Apple when a key is missing) and (re)builds its transcriber.
     private func activateEngine() {
+        loadModelTask?.cancel()
+        loadModelToken = UUID()
         let chosen = settings.engine
         var resolved = chosen
         if !chosen.isAvailable {
             log.notice("activateEngine: \(chosen.wireKey, privacy: .public) needs an API key — running on Apple until it is added")
             resolved = .appleLocal
         }
-        if let built = resolved.makeTranscriber(locale: settings.locale) {
+        if resolved == .appleLocal { normalizeAppleLocale() }
+        if case .local = activeEngine {
+            if case .local = resolved {
+                // Loading the next model releases the previous weights under the inference gate.
+            } else {
+                Task { await LocalModelTranscriber.releaseModel() }
+            }
+        }
+        let directory: URL?
+        if case .local(let model) = resolved {
+            directory = localModels.directory(for: model)
+            guard directory != nil else {
+                activeEngine = resolved
+                engine = .needsDownload(model)
+                return
+            }
+        } else {
+            directory = nil
+        }
+        if let built = resolved.makeTranscriber(locale: settings.locale, localModelDirectory: directory) {
             transcriber = built
         } else {
             resolved = .appleLocal
@@ -440,25 +465,53 @@ final class Coordinator {
         switch resolved {
         case .appleLocal:
             reloadAppleModel()
+        case .local(let model):
+            guard let local = transcriber as? LocalModelTranscriber else { return }
+            let token = loadModelToken
+            engine = .loadingLocalModel(model)
+            loadModelTask = Task { [weak self] in
+                do {
+                    try await local.prepare()
+                    guard let self, !Task.isCancelled, self.loadModelToken == token else { return }
+                    self.engine = .ready
+                } catch {
+                    guard let self, !Task.isCancelled, self.loadModelToken == token else { return }
+                    self.engine = .failed(error.localizedDescription)
+                }
+            }
         case .openRouter, .elevenLabsScribe, .geminiTranscribeLive:
             loadModelTask?.cancel()
             engine = .ready
         }
     }
 
+    private func normalizeAppleLocale() {
+        guard !availableLocales.isEmpty else { return }
+        let current = settings.locale.identifier(.bcp47)
+        guard !availableLocales.contains(where: { $0.identifier(.bcp47) == current }) else { return }
+        let choices = SpeechLanguages.choices(for: nil, availableLocales: availableLocales, userRegion: Locale.current.region?.identifier)
+        let language = settings.locale.language.languageCode?.identifier
+        if let choice = choices.first(where: { $0.language.languageCode?.identifier == language })
+            ?? choices.first(where: { $0.language.languageCode?.identifier == "en" }) ?? choices.first
+        {
+            settings.locale = choice
+        }
+    }
+
     private func reloadAppleModel() {
         loadModelTask?.cancel()
+        let token = loadModelToken
         let locale = settings.locale
         engine = .downloadingModel(locale)
         loadModelTask = Task { [weak self] in
             guard let self else { return }
             do {
                 try await SpeechAnalyzerTranscriber.ensureModel(for: locale)
-                guard !Task.isCancelled, locale == self.settings.locale, self.activeEngine == .appleLocal else { return }
+                guard !Task.isCancelled, self.loadModelToken == token, self.activeEngine == .appleLocal else { return }
                 self.engine = .ready
                 self.log.notice("loadModel: ready \(locale.identifier, privacy: .public)")
             } catch {
-                guard !Task.isCancelled, locale == self.settings.locale, self.activeEngine == .appleLocal else { return }
+                guard !Task.isCancelled, self.loadModelToken == token, self.activeEngine == .appleLocal else { return }
                 self.log.error("loadModel: \(String(describing: error))")
                 self.engine = .failed("model download failed")
             }
@@ -552,7 +605,7 @@ final class Coordinator {
 
         let token = UUID()
         // dictionary → transcription and style → transcription, in one object every engine receives.
-        let hints = TranscriptionHints(vocabulary: rules.lexicon.terms, mode: rules.polish == .off ? .verbatim : .smart)
+        let hints = TranscriptionHints(vocabulary: rules.lexicon.terms, mode: rules.polish.transcriptMode)
         // The pill follows one streaming engine; the others race silently.
         let pillEngine = lineup.first { $0.engine.deliversPartials }?.engine
         let contenders = zip(lineup, Self.fanOut(audio, count: lineup.count)).map { entry, stream in
@@ -600,7 +653,7 @@ final class Coordinator {
 
     /// The engines a take races: the user's selection minus any without a key. Never empty.
     private func racingLineup() -> [(engine: Engine, transcriber: any Transcriber)] {
-        let chosen = Engine.all.filter { $0.isAvailable && settings.isRacing($0) }
+        let chosen = Engine.all.filter { canRace($0) && settings.isRacing($0) }
         let lineup: [(engine: Engine, transcriber: any Transcriber)] = chosen.compactMap { engine in
             if engine == activeEngine { return (engine, transcriber) }
             return engine.makeTranscriber(locale: settings.locale).map { (engine, $0) }
@@ -656,7 +709,8 @@ final class Coordinator {
         let transcribeStart = clock.now
         let raw: RawTranscript
         do {
-            raw = try await Self.value(of: session.contenders[0].transcription, within: Self.transcriptionTimeout)
+            let limit = session.rules.engine.transcriptionLimit(audioDuration: session.transcriptionLimit)
+            raw = try await Self.value(of: session.contenders[0].transcription, within: limit)
         } catch {
             guard !Task.isCancelled, isRunning else { return }
             session.rivalWatch?.cancel()
@@ -677,35 +731,25 @@ final class Coordinator {
             return
         }
 
-        var delivered = InsertableText.raw(raw)
         if session.rules.polish != .off {
             phase = .finishing(session, .polishing)
             overlay.render(.working(FinishingStep.polishing.label))
-            let polishStart = clock.now
-            let polisher: any Polisher
-            switch session.rules.polishEngine {
-            case .onDevice: polisher = onDevicePolisher
-            case .openRouter: polisher = OpenRouterPolisher(key: KeyStore.value("OPENROUTER_API_KEY") ?? "")
-            }
-            let style = session.rules.style
-            let text = raw.text
-            let context = PolishContext(fieldText: session.rules.fieldContext, terms: session.rules.lexicon.terms)
-            let intensity: PolishIntensity = session.rules.polish == .light ? .light : .full
-            let words = text.split(whereSeparator: \.isWhitespace).count
-            let verdict: PolishVerdict =
-                await Self.race(timeout: Self.polishTimeout(forWords: words)) { () -> PolishVerdict in
-                    await polisher.polish(text, style: style, intensity: intensity, context: context)
-                } ?? PolishVerdict.keepRaw(.timeout)
-            switch verdict {
-            case .accept(let polished): delivered = .polished(polished, spoken: raw)
-            case .keepRaw(let rejection): log.notice("finish: kept raw (\(rejection.label, privacy: .public))")
-            }
-            timing.polish = clock.now - polishStart
+        }
+        let polisher: any Polisher
+        switch session.rules.polishEngine {
+        case .onDevice: polisher = onDevicePolisher
+        case .openRouter: polisher = OpenRouterPolisher(key: KeyStore.value("OPENROUTER_API_KEY") ?? "")
+        }
+        let cleanup = await TextPipeline.finish(
+            raw, mode: session.rules.polish, style: session.rules.style,
+            lexicon: session.rules.lexicon, polisher: polisher, fieldContext: session.rules.fieldContext
+        )
+        let delivered = cleanup.delivered
+        timing.polish = cleanup.polishDuration
+        if let rejection = cleanup.rejection {
+            log.notice("finish: kept raw (\(rejection.label, privacy: .public))")
         }
         guard !Task.isCancelled, isRunning else { return }
-        if let rewritten = session.rules.lexicon.rewriteResult(of: delivered.text) {
-            delivered = .rewritten(text: rewritten, over: delivered)
-        }
 
         phase = .finishing(session, .inserting)
         overlay.render(.working(FinishingStep.inserting.label))
@@ -727,6 +771,7 @@ final class Coordinator {
     /// the same clock. One take, every row.
     private func finishRace(_ session: LiveSession, target: BakeoffTarget, expected: String?, runID: UUID, takeID: UUID) async {
         let releasedAt = session.releasedAt ?? clock.now
+        let audioDuration = session.transcriptionLimit
         let clock = self.clock
         var results: [(index: Int, result: EngineResult)] = []
         await withTaskGroup(of: (Int, EngineResult).self) { group in
@@ -734,7 +779,8 @@ final class Coordinator {
                 let key = contender.engine.wireKey
                 group.addTask {
                     do {
-                        let raw = try await Self.value(of: contender.transcription, within: Self.transcriptionTimeout)
+                        let limit = contender.engine.transcriptionLimit(audioDuration: audioDuration)
+                        let raw = try await Self.value(of: contender.transcription, within: limit)
                         let ms = (clock.now - releasedAt).milliseconds
                         let outcome: EngineOutcome =
                             raw.text.isEmpty ? .failed(reason: "nothing heard") : .scored(spoken: raw.text, ours: raw.text, ms: ms)
@@ -886,11 +932,10 @@ final class Coordinator {
     private func bootstrap() async {
         onDevicePolisher.prewarm()
         refreshPermissions()
+        availableLocales = await SpeechAnalyzerTranscriber.supportedLocales()
+            .sorted { $0.displayName < $1.displayName }
+        guard !Task.isCancelled, isRunning else { return }
         refreshKeys()
-        Task {
-            availableLocales = await SpeechAnalyzerTranscriber.supportedLocales()
-                .sorted { $0.displayName < $1.displayName }
-        }
     }
 
     private func startGesture() {
@@ -972,36 +1017,6 @@ final class Coordinator {
         }
     }
 
-    /// Runs non-throwing work against a deadline; nil on timeout. Returns at the deadline even if the
-    /// loser ignores cancellation (the on-device model is only cooperatively cancellable).
-    private static func race<T: Sendable>(timeout: Duration, _ work: @escaping @Sendable () async -> T) async -> T? {
-        let once = OnceResume<T?>()
-        return await withCheckedContinuation { continuation in
-            let worker = Task {
-                let value = await work()
-                once.resume(continuation, with: value)
-            }
-            Task {
-                try? await Task.sleep(for: timeout)
-                once.resume(continuation, with: nil)
-                worker.cancel()
-            }
-        }
-    }
-}
-
-/// Resumes a continuation exactly once across racing tasks.
-final class OnceResume<T>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var done = false
-
-    func resume(_ continuation: CheckedContinuation<T, Never>, with value: T) {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !done else { return }
-        done = true
-        continuation.resume(returning: value)
-    }
 }
 
 extension Duration {

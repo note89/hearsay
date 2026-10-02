@@ -19,6 +19,7 @@ if ! swift build -c "$CONFIG" --arch arm64 > "$BUILD_LOG" 2>&1; then
     exit 1
 fi
 BIN_DIR="$(swift build -c "$CONFIG" --arch arm64 --show-bin-path)"
+scripts/local-inference-resources.sh "$CONFIG"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -26,6 +27,21 @@ cp "$BIN_DIR/hearsay" "$APP/Contents/MacOS/hearsay"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp LICENSE "$APP/Contents/Resources/LICENSE"
+cp "$BIN_DIR/mlx.metallib" "$APP/Contents/Resources/mlx.metallib"
+ln -s ../Resources/mlx.metallib "$APP/Contents/MacOS/mlx.metallib"
+for RESOURCE_BUNDLE in "$BIN_DIR"/*.bundle; do
+    [[ -d $RESOURCE_BUNDLE ]] || continue
+    cp -R "$RESOURCE_BUNDLE" "$APP/Contents/Resources/"
+done
+mkdir -p "$APP/Contents/Resources/ThirdPartyLicenses"
+for DEPENDENCY_DIRECTORY in .build/checkouts/*; do
+    [[ -d $DEPENDENCY_DIRECTORY ]] || continue
+    DEPENDENCY="$(basename "$DEPENDENCY_DIRECTORY")"
+    for NOTICE in LICENSE LICENSE.txt LICENSE.md LICENCE COPYING NOTICE; do
+        [[ -f $DEPENDENCY_DIRECTORY/$NOTICE ]] || continue
+        cp "$DEPENDENCY_DIRECTORY/$NOTICE" "$APP/Contents/Resources/ThirdPartyLicenses/$DEPENDENCY-$NOTICE"
+    done
+done
 
 # Reuse the release identity locally so permission grants survive updates.
 # Without it, retain the project's stable development identity where available.

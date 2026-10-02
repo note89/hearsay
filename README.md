@@ -19,7 +19,7 @@ The words land where your cursor was — and the audio never left your machine.<
 
 Push-to-talk dictation, built to beat the cloud subscription apps at their own game:
 
-- **On-device by default.** macOS: Apple's SpeechAnalyzer and on-device LLM. Linux and Windows: whisper.cpp. No account, no subscription, no network. $0.
+- **On-device by default.** macOS: Apple's SpeechAnalyzer and on-device LLM, with downloadable Cohere, Qwen, Parakeet and Whisper alternatives. Linux and Windows: whisper.cpp. No account or subscription; dictation works offline after model setup. $0.
 - **Cleanup that writes what you meant.** Punctuation, fillers gone, self-corrections applied, dense phrasing, lists, per-app tone. Off / Light / Full.
 - **Mixed languages mid-sentence.** Svengelska works with the cloud engines.
 - **A built-in bake-off lab.** Race every engine against Wispr Flow (or any rival) on identical audio, and get word-error-rate and latency scoreboards, measured honestly.
@@ -44,6 +44,8 @@ Or download `hearsay-0.3.0.zip` from [Releases](https://github.com/note89/hearsa
 Menu bar → **Open hearsay…** → **General** shows the permission setup. Click **Enable** for **Microphone**, **Input Monitoring**, and **Accessibility**, granting each when macOS asks. Accessibility enables insertion; without it, finished text goes to the clipboard. Relaunch after granting Input Monitoring when macOS asks.
 
 Put the cursor anywhere you can type. **Hold fn+shift, talk, release.** General options let you choose another modifier shortcut and position the floating bar. No Hearsay account is required.
+
+To use another local speech model, open **Dictation**, click its **Download** button, then **Use**. Progress, **Cancel** and **Retry** are in the same card. The download installs the model files; no Python installation, terminal command or API key is needed. Internet is needed for the initial download, then speech recognition runs on this Mac.
 
 Update a Homebrew install with `brew upgrade --cask note89/tap/hearsay`. About → **Check for updates** can check GitHub and open the latest release for a manual download.
 
@@ -112,10 +114,63 @@ a shell with the toolchain and every build dependency. If you really want the re
 
 ### Which local model
 
-The Download button offers two whisper.cpp models; the prebuilt binaries run them on the CPU.
+**macOS** offers four downloadable models alongside Apple on-device:
+
+| Model | Download | Loading + first transcription | Repeat dictation (already loaded) | Languages | When to try it |
+|---|---|---|---|---|---|
+| **Cohere Transcribe 2B** | ~2.42 GB, MLX 8-bit | 5.28 s | Not measured yet | 14: 🇬🇧🇺🇸 English, 🇵🇹🇧🇷 Portuguese and others; no 🇸🇪 Swedish | Compare it for a supported language. Choose the language in Dictation. |
+| **Qwen3-ASR 1.7B** | ~2.47 GB, MLX 8-bit | 6.43 s | Not measured yet | 30, including 🇬🇧🇺🇸 English, 🇸🇪 Swedish and 🇵🇹🇧🇷 Portuguese; automatic detection | A starting point for multilingual dictation. |
+| **Parakeet Redux** | ~220 MB, Core ML | 5.31 s | Not measured yet | 25 European languages, including 🇸🇪 Swedish and 🇵🇹🇧🇷 Portuguese; automatic detection | The smallest download; compare it on your own recordings. |
+| **Whisper large-v3-turbo** | ~1.62 GB, MLX | 7.09 s | Not measured yet | 100, including 🇸🇪 Swedish and 🇵🇹🇧🇷 Portuguese; choose the language in Dictation | A mature baseline to compare with the newer models. |
+
+**Loading is an activation cost, not a cost for every dictation.** Hearsay loads the selected model into memory when you activate it and keeps it there for subsequent dictations. It loads again after switching engines or restarting Hearsay. The downloaded files remain on disk until you remove them.
+
+The loading-plus-first-transcription column records one run of the same short synthetic English recording on an M3 Pro with 18 GB memory, using the native Swift development build on 2 October 2026. It includes loading the model and transcription, with networking denied; it excludes text cleanup. These are initial functional measurements, not warmed-up dictation latency or an accuracy ranking. Small differences should not decide which model to use. Cohere also processed a 462.89-second synthetic recording in 38.35 seconds, about 12 times faster than real time, retaining the final sentence. Representative recordings and repeated runs are still needed to compare accuracy and everyday latency.
+
+Supported languages are listed below and in each in-app model card. Flags are visual cues; language support is not restricted to those countries. Qwen also lists 22 Chinese dialects.
+
+<details><summary>Cohere Transcribe 2B: all 14 supported languages</summary>
+
+🇪🇬 Arabic · 🇨🇳 Chinese · 🇳🇱 Dutch · 🇬🇧🇺🇸 English · 🇫🇷 French · 🇩🇪 German · 🇬🇷 Greek · 🇮🇹 Italian · 🇯🇵 Japanese · 🇰🇷 Korean · 🇵🇱 Polish · 🇵🇹🇧🇷 Portuguese · 🇪🇸 Spanish · 🇻🇳 Vietnamese
+
+[Model information](https://huggingface.co/beshkenadze/cohere-transcribe-03-2026-mlx-8bit)
+
+</details>
+
+<details><summary>Qwen3-ASR 1.7B: all 30 supported languages</summary>
+
+🇪🇬 Arabic · 🇭🇰 Cantonese · 🇨🇳 Chinese · 🇨🇿 Czech · 🇩🇰 Danish · 🇳🇱 Dutch · 🇬🇧🇺🇸 English · 🇵🇭 Filipino · 🇫🇮 Finnish · 🇫🇷 French · 🇩🇪 German · 🇬🇷 Greek · 🇮🇳 Hindi · 🇭🇺 Hungarian · 🇮🇩 Indonesian · 🇮🇹 Italian · 🇯🇵 Japanese · 🇰🇷 Korean · 🇲🇰 Macedonian · 🇲🇾 Malay · 🇮🇷 Persian · 🇵🇱 Polish · 🇵🇹🇧🇷 Portuguese · 🇷🇴 Romanian · 🇷🇺 Russian · 🇪🇸 Spanish · 🇸🇪 Swedish · 🇹🇭 Thai · 🇹🇷 Turkish · 🇻🇳 Vietnamese
+
+[Model information](https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-8bit)
+
+</details>
+
+<details><summary>Parakeet Redux: all 25 supported languages</summary>
+
+🇧🇬 Bulgarian · 🇭🇷 Croatian · 🇨🇿 Czech · 🇩🇰 Danish · 🇳🇱 Dutch · 🇬🇧🇺🇸 English · 🇪🇪 Estonian · 🇫🇮 Finnish · 🇫🇷 French · 🇩🇪 German · 🇬🇷 Greek · 🇭🇺 Hungarian · 🇮🇹 Italian · 🇱🇻 Latvian · 🇱🇹 Lithuanian · 🇲🇹 Maltese · 🇵🇱 Polish · 🇵🇹🇧🇷 Portuguese · 🇷🇴 Romanian · 🇷🇺 Russian · 🇸🇰 Slovak · 🇸🇮 Slovenian · 🇪🇸 Spanish · 🇸🇪 Swedish · 🇺🇦 Ukrainian
+
+[Model information](https://huggingface.co/FluidInference/parakeet-redux-coreml)
+
+</details>
+
+<details><summary>Whisper large-v3-turbo: all 100 supported languages</summary>
+
+🇿🇦 Afrikaans · 🇦🇱 Albanian · 🇪🇹 Amharic · 🇪🇬 Arabic · 🇦🇲 Armenian · 🇮🇳 Assamese · 🇦🇿 Azerbaijani · 🇧🇩 Bangla · 🇷🇺 Bashkir · 🇪🇸 Basque · 🇧🇾 Belarusian · 🇧🇦 Bosnian · 🇫🇷 Breton · 🇧🇬 Bulgarian · 🇲🇲 Burmese · 🇭🇰 Cantonese · 🇪🇸 Catalan · 🇨🇳 Chinese · 🇭🇷 Croatian · 🇨🇿 Czech · 🇩🇰 Danish · 🇳🇱 Dutch · 🇬🇧🇺🇸 English · 🇪🇪 Estonian · 🇫🇴 Faroese · 🇵🇭 Filipino · 🇫🇮 Finnish · 🇫🇷 French · 🇪🇸 Galician · 🇬🇪 Georgian · 🇩🇪 German · 🇬🇷 Greek · 🇮🇳 Gujarati · 🇭🇹 Haitian Creole · 🇳🇬 Hausa · 🇺🇸 Hawaiian · 🇮🇱 Hebrew · 🇮🇳 Hindi · 🇭🇺 Hungarian · 🇮🇸 Icelandic · 🇮🇩 Indonesian · 🇮🇹 Italian · 🇯🇵 Japanese · 🇮🇩 Javanese · 🇮🇳 Kannada · 🇰🇿 Kazakh · 🇰🇭 Khmer · 🇰🇷 Korean · 🇱🇦 Lao · 🇻🇦 Latin · 🇱🇻 Latvian · 🇨🇩 Lingala · 🇱🇹 Lithuanian · 🇱🇺 Luxembourgish · 🇲🇰 Macedonian · 🇲🇬 Malagasy · 🇲🇾 Malay · 🇮🇳 Malayalam · 🇲🇹 Maltese · 🇳🇿 Māori · 🇮🇳 Marathi · 🇲🇳 Mongolian · 🇳🇵 Nepali · 🇳🇴 Norwegian Bokmål · 🇳🇴 Norwegian Nynorsk · 🇫🇷 Occitan · 🇦🇫 Pashto · 🇮🇷 Persian · 🇵🇱 Polish · 🇵🇹🇧🇷 Portuguese · 🇮🇳 Punjabi · 🇷🇴 Romanian · 🇷🇺 Russian · 🇮🇳 Sanskrit · 🇷🇸 Serbian · 🇿🇼 Shona · 🇵🇰 Sindhi · 🇱🇰 Sinhala · 🇸🇰 Slovak · 🇸🇮 Slovenian · 🇸🇴 Somali · 🇪🇸 Spanish · 🇮🇩 Sundanese · 🇹🇿 Swahili · 🇸🇪 Swedish · 🇹🇯 Tajik · 🇮🇳 Tamil · 🇷🇺 Tatar · 🇮🇳 Telugu · 🇹🇭 Thai · 🇨🇳 Tibetan · 🇹🇷 Turkish · 🇹🇲 Turkmen · 🇺🇦 Ukrainian · 🇵🇰 Urdu · 🇺🇿 Uzbek · 🇻🇳 Vietnamese · 🇬🇧 Welsh · 🇺🇦 Yiddish · 🇳🇬 Yoruba
+
+[Model information](https://huggingface.co/openai/whisper-large-v3-turbo)
+
+</details>
+
+Download sizes describe the packages Hearsay uses. Redux's Core ML package includes its decoder and preprocessor, so it is larger than the original 178 MB Photon weights. Downloads are checked against pinned file checksums and installed only when complete. Models live in `~/Library/Application Support/hearsay/local-models`.
+
+These four engines collect the audio while you hold the key and transcribe after release; they do not display live partial text. Only one downloaded model runs at a time, including in Bake-off, to keep memory use manageable. Accuracy and speed depend on your voice, language and Mac: use the built-in Bake-off to compare them on your own dictation.
+
+Whisper remains a useful option. Newer models can improve particular accuracy or speed tradeoffs; broad language support and mature implementations still make Whisper worth comparing. Hearsay's native Mac Whisper engine requires a language selection; Qwen and Redux detect it automatically.
+
+**Linux and Windows** offer two whisper.cpp models; the prebuilt binaries run them on the CPU.
 
 - **base.en** (150 MB) — English only, about half a second per sentence on any recent CPU. Start here.
-- **large-v3-turbo** (1.6 GB) — 99 languages with auto-detect, the best local accuracy. A few seconds per sentence on a good CPU. For a GPU, build from source with `--features cuda` (NVIDIA, needs the CUDA toolkit), `--features vulkan` (any Vulkan driver) or `--features metal` (Apple); these are whisper.cpp's own back ends, passed straight through, and we have not benchmarked them.
+- **large-v3-turbo** (1.6 GB) — broad language coverage with auto-detect and higher accuracy than base.en. A few seconds per sentence on a good CPU. For a GPU, build from source with `--features cuda` (NVIDIA, needs the CUDA toolkit), `--features vulkan` (any Vulkan driver) or `--features metal` (Apple); these are whisper.cpp's own back ends, passed straight through, and we have not benchmarked them.
 
 Local models are batch: text appears at key-up. If you want partials in the pill on Linux or Windows, Gemini 3.5 Transcribe (cloud) streams.
 
@@ -132,7 +187,7 @@ Everything lives in one window (macOS: menu bar → **Open hearsay…**; Linux a
 | Pane | What's there |
 |---|---|
 | **General** (macOS) | dictation shortcut, pause dictation, launch at login, floating bar preview and position reset |
-| **Dictation** | engine cards, model download on Linux/Windows, language (only when the engine needs one), permissions |
+| **Dictation** | engine cards, local model downloads, language (only when the engine needs one), permissions |
 | **Cloud providers** (macOS) | optional provider keys, secure Keychain storage, key source and removal; on Linux/Windows, keys live in Dictation |
 | **Dictionary** | your terms (`mprocs`) and rewrites (`mprox => mprocs`) — a plain text file underneath |
 | **Style** | cleanup level with example outputs, and which model does it: on this machine, or Gemini 3.7 Flash via OpenRouter for long, structured rewrites; on macOS the app→tone table |
@@ -149,6 +204,10 @@ Everything lives in one window (macOS: menu bar → **Open hearsay…**; Linux a
 | Engine | Runs | Cost | Language |
 |---|---|---|---|
 | **Apple on-device** (macOS default) | this Mac, offline | $0 | picked by you, one at a time |
+| **Cohere Transcribe 2B** (macOS) | this Mac, offline after download | $0 | 14 languages, picked by you |
+| **Qwen3-ASR 1.7B** (macOS) | this Mac, offline after download | $0 | 30 languages, automatic |
+| **Parakeet Redux** (macOS) | this Mac, offline after download | $0 | 25 European languages, automatic |
+| **Whisper large-v3-turbo** (macOS) | this Mac, offline after download | $0 | 100 languages, picked by you |
 | **whisper.cpp** (Linux and Windows default) | this machine, offline | $0 | base.en: English · large-v3-turbo: 99 languages |
 | ElevenLabs Scribe v2 | ElevenLabs cloud | ~$2.45 / 100k words | automatic, mid-sentence mixing |
 | Gemini 3.5 Transcribe (live) | Google cloud, streaming | ~$6 / 100k words, free tier in preview | automatic, mid-sentence mixing |
@@ -156,7 +215,7 @@ Everything lives in one window (macOS: menu bar → **Open hearsay…**; Linux a
 
 Gemini 3.5 Transcribe is the one cloud engine that streams: audio goes up while you hold the key, partials show in the pill, and the final text is ready almost as you release. Your dictionary terms become its custom vocabulary, and with Style Light or Full it runs the model's own filler removal.
 
-Which to pick: offline and English, base.en or Apple. Offline and Swedish, large-v3-turbo. You have an OpenRouter key, Gemini 3.7 Flash also unlocks cloud cleanup on Linux and Windows. You want the fastest cloud path, Gemini 3.5 Transcribe.
+Which to pick: on macOS, start with Apple or download Qwen for English, Swedish and Portuguese; compare Cohere for its supported languages and Redux for a compact download. On Linux and Windows, base.en is the small English option and large-v3-turbo adds multilingual recognition. An OpenRouter key also unlocks cloud cleanup on Linux and Windows. Gemini 3.5 Transcribe is the cloud streaming option.
 
 ### API keys
 
@@ -173,10 +232,11 @@ Data folder: macOS `~/Library/Application Support/hearsay`, Linux `~/.local/shar
 ## Privacy, precisely
 
 - Local engines: audio, transcript, field context — nothing leaves the machine.
-- Cleanup runs on-device by default on macOS. The cloud cleanup model (OpenRouter) is opt-in, on every platform, and receives exactly the transcript and your dictionary terms: field context is never read when the cloud model is selected, so nothing from your screen leaves the machine. Off keeps everything local.
+- Cleanup runs on-device by default on macOS. The cloud cleanup model (OpenRouter) is opt-in, on every platform, and receives exactly the transcript and your dictionary terms: field context is never read when the cloud model is selected, so nothing from your screen leaves the machine. Choose a local speech engine and on-device cleanup (or Off) to keep the entire dictation local.
 - Secure (password) fields: on macOS dictation is blocked before the microphone even starts. Linux and Windows cannot detect them; a dictated password would land in History, so pause History first.
 - The system log gets timings and outcomes, never content. History is 0600, clearable, optional. Clipboard writes are marked transient on macOS so clipboard managers skip them.
 - Cloud engines upload exactly one thing: the utterance audio, to the provider you picked.
+- Model downloads contact Hugging Face for the selected model files. They send no audio, transcript, field context or provider keys. Downloaded models load from disk for dictation.
 - Update checks contact GitHub only when you choose **Check for updates**. They send no dictation content or API keys. Launch at login and cloud engines are optional.
 
 ## The bake-off
@@ -187,12 +247,28 @@ Data folder: macOS `~/Library/Application Support/hearsay`, Linux `~/.local/shar
 
 Open the **Bake-off** pane, run Wispr Flow alongside, tick the engines to race, and read the ten script sentences (English with numbers and jargon, one Swedish, two svengelska, one Portuguese). Every ticked engine hears the same audio from the same key-up, each on its own clock; hearsay never inserts while the pane is front — it watches the pane's text box for the rival's output and scores everything against the on-screen sentence: word-level diffs, WER (numeral style, units, ordinals and contractions never count as errors), latency, a leaderboard, and each engine's record against the rival.
 
+On macOS, download local models in Dictation first. Bake-off can include one downloaded model alongside Apple and any cloud engines; choosing another downloaded model replaces the previous one in the lineup. It never downloads a model as part of a take.
+
 Engines are scored on their raw text; Style is a separate concept and would only blur the comparison. A take stores the sentence it was a take of and every engine's result, failures included — in a benchmark, not answering is a loss. **Archive & reset run** moves the run to `bakeoff.run-<stamp>.jsonl` in the data folder.
+
+### Repeatable recorded benchmark
+
+Record your voice once and replay it through the full pipeline after each change:
+
+```sh
+scripts/benchmark.sh init "$HOME/Library/Application Support/hearsay/benchmark"
+scripts/benchmark.sh record "$HOME/Library/Application Support/hearsay/benchmark"
+scripts/benchmark.sh run "$HOME/Library/Application Support/hearsay/benchmark" --all-models --execution hybrid
+```
+
+Choose `sequential`, `hybrid` (cloud engines together, then local engines one at a time), or `parallel` (compatible engines overlap the downloaded-model lane). Reports separate cold model startup, total time, raw transcription accuracy, final text accuracy, punctuation/formatting, and cleanup fallbacks. Save an ideal output and optionally the rival's output for each recording; compare later runs with `--baseline <report.json> --fail-on-regression`. The personal corpus stays outside Git. [Corpus format, execution modes and baseline workflow](docs/recorded-benchmark.md).
 
 ## Field context & dictionary
 
 - **Field context** (macOS, default on): ~600 chars around your cursor go to the *on-device* cleanup model as terminology reference — the accuracy trick cloud apps upload your screen for, done locally.
 - **Dictionary**: terms bias the cleanup toward exact spellings (and become custom vocabulary for engines that take one); `from => to` rewrites apply deterministically even with cleanup off. Nothing is ever learned behind your back.
+
+For a fully local workflow with Wispr Flow-style cleanup on macOS, choose a local Dictation engine and **Style → On this Mac**. **Light** handles punctuation, capitalization, fillers and explicit self-corrections while keeping the wording. **Full** also tightens phrasing and structures paragraphs and lists according to the target app. Apple's Foundation Models framework performs this pass on-device; it requires Apple Intelligence to be enabled and its model available. Language support depends on the installed OS and model. If cleanup is unavailable, fails, times out or fails Hearsay's meaning-drift check, Hearsay keeps the raw transcription and applies your dictionary rewrites. It does not fall back to cloud cleanup.
 
 ## Build from source
 
