@@ -1,5 +1,6 @@
 import AppKit
 import Bakeoff
+import Pipeline
 import SwiftUI
 
 struct BakeoffPane: View {
@@ -65,27 +66,37 @@ struct BakeoffPane: View {
 
     /// Who races: a chip per engine. Engines without a key sit out; the lineup is a setting.
     private var lineup: some View {
-        HStack(spacing: 8) {
-            ForEach(Engine.all, id: \.wireKey) { engine in
-                let racing = coordinator.settings.isRacing(engine) && engine.isAvailable
-                Button {
-                    coordinator.settings.toggleRacing(engine)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: racing ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(racing ? Color.accentColor : Color.secondary)
-                        Text(engine.shortLabel)
-                        if !engine.isAvailable {
-                            Text("needs key").font(.caption2).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(Engine.all, id: \.wireKey) { engine in
+                        let available = coordinator.canRace(engine)
+                        let racing = coordinator.settings.isRacing(engine) && available
+                        Button {
+                            coordinator.settings.toggleRacing(engine)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: racing ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(racing ? Color.accentColor : Color.secondary)
+                                Text(engine.shortLabel)
+                                if !available {
+                                    Text(engine.privacyClass == .cloud ? "needs key" : "select in Dictation")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(Capsule().fill(racing ? Color.accentColor.opacity(0.16) : Color(nsColor: .quaternarySystemFill)))
                         }
+                        .buttonStyle(.plain)
+                        .disabled(!available || !idle)
                     }
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(Capsule().fill(racing ? Color.accentColor.opacity(0.16) : Color(nsColor: .quaternarySystemFill)))
+                    Spacer()
                 }
-                .buttonStyle(.plain)
-                .disabled(!engine.isAvailable || !idle)
             }
-            Spacer()
+            Text(
+                "The selected downloaded model races alongside Apple and enabled cloud engines. Switch models in Dictation to compare another download."
+            )
+            .font(.caption).foregroundStyle(.secondary)
         }
     }
 

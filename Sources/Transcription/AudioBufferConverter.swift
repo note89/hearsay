@@ -20,6 +20,7 @@ struct AudioBufferConverter {
         if buffer.format == target { return buffer }
         if converter == nil || converter?.inputFormat != buffer.format {
             converter = AVAudioConverter(from: buffer.format, to: target)
+            converter?.downmix = target.channelCount < buffer.format.channelCount
         }
         guard let converter else { return nil }
         let ratio = target.sampleRate / buffer.format.sampleRate
@@ -38,5 +39,22 @@ struct AudioBufferConverter {
         }
         if status == .error { throw conversionError ?? AudioConversionFailure.conversionFailed }
         return out.frameLength > 0 ? out : nil
+    }
+
+    mutating func finish() throws -> AVAudioPCMBuffer? {
+        guard let converter else { return nil }
+        let ratio = target.sampleRate / converter.inputFormat.sampleRate
+        let trailingFrames = AVAudioFrameCount((Double(converter.primeInfo.trailingFrames) * ratio * 2).rounded(.up))
+        guard let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: max(trailingFrames + Self.slackFrames, 512)) else {
+            return nil
+        }
+        var conversionError: NSError?
+        let status = converter.convert(to: output, error: &conversionError) { _, inputStatus in
+            inputStatus.pointee = .endOfStream
+            return nil
+        }
+        self.converter = nil
+        if status == .error { throw conversionError ?? AudioConversionFailure.conversionFailed }
+        return output.frameLength > 0 ? output : nil
     }
 }

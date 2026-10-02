@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "repetitions": 1,
+  "pacing": "realtime",
+  "execution": "hybrid",
+  "pipelines": [
+    {"id": "apple-raw", "engine": "apple-local", "polish": "off", "polishEngine": "onDevice"},
+    {"id": "apple-light", "engine": "apple-local", "polish": "light", "polishEngine": "onDevice"},
+    {"id": "apple-full", "engine": "apple-local", "polish": "full", "polishEngine": "onDevice"}
+  ]
+}
