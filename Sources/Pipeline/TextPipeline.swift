@@ -10,7 +10,7 @@ public enum PolishMode: String, Codable, Sendable {
 }
 
 public enum PolishEngine: String, Codable, Sendable {
-    case onDevice, openRouter
+    case onDevice, openRouter, ollama
 }
 
 public indirect enum InsertableText: Sendable {

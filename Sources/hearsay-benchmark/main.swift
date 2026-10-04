@@ -77,7 +77,15 @@ struct BenchmarkCommand {
             let cloud = config.pipelines.contains {
                 $0.engine.privacyClass == .cloud || ($0.polish != .off && $0.polishEngine == .openRouter)
             }
-            print(cloud ? "Running configured cloud pipelines: audio/transcripts go to those providers." : "Running on-device pipelines.")
+            let ollama = config.pipelines.contains { $0.polish != .off && $0.polishEngine == .ollama }
+            if cloud {
+                print("Running configured cloud pipelines: audio/transcripts go to those providers.")
+            } else {
+                print(ollama ? "Running local speech pipelines with Ollama cleanup." : "Running on-device pipelines.")
+            }
+            if ollama {
+                print("Ollama receives transcripts and dictionary terms. Local models stay local; Ollama cloud models use their provider.")
+            }
             let report = try await BenchmarkRunner.run(
                 suite: suite, directory: directory, configuration: config,
                 codeRevision: ProcessInfo.processInfo.environment["HEARSAY_BENCHMARK_REVISION"] ?? "unknown",

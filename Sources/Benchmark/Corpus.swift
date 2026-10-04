@@ -104,8 +104,13 @@ public struct BenchmarkConfiguration: Codable, Sendable {
             throw BenchmarkError("BenchmarkConfiguration.load: pipeline IDs must be unique letters, digits, underscores or hyphens")
         }
         for pipeline in config.pipelines where pipeline.polishModel != nil {
-            guard pipeline.polishEngine == .openRouter, pipeline.polish != .off, pipeline.polishModel?.isEmpty == false else {
-                throw BenchmarkError("BenchmarkConfiguration.load: polishModel requires active OpenRouter cleanup")
+            guard pipeline.polishEngine != .onDevice, pipeline.polish != .off, pipeline.polishModel?.isEmpty == false else {
+                throw BenchmarkError("BenchmarkConfiguration.load: polishModel requires active OpenRouter or Ollama cleanup")
+            }
+        }
+        for pipeline in config.pipelines where pipeline.polishEngine == .ollama && pipeline.polish != .off {
+            guard pipeline.polishModel?.isEmpty == false else {
+                throw BenchmarkError("BenchmarkConfiguration.load: Ollama cleanup needs polishModel")
             }
         }
         return config

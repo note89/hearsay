@@ -19,8 +19,8 @@ struct SessionRules {
     let engine: Engine
     let style: WritingStyle
     let polish: PolishMode
-    /// Resolved at press: the cloud choice falls back to on-device when no key is present.
-    let polishEngine: PolishEngine
+    /// Model and credentials are snapshotted at press, along with the cleanup mode.
+    let polisher: any Polisher
     /// Field text around the cursor, captured at press. Feeds only the on-device polish model.
     let fieldContext: String?
     let lexicon: Lexicon
@@ -182,7 +182,7 @@ final class Coordinator {
     }
     /// Set by the Bake-off pane's appear/disappear. Being in the pane IS bake-off mode.
     var bakeoffPaneVisible = false
-    let settings = Settings()
+    let settings: Settings
     let history: HistoryStore
     let bakeoff: BakeoffStore
     @ObservationIgnored private var dictionaryURL: URL!
@@ -213,7 +213,8 @@ final class Coordinator {
     @ObservationIgnored private let clock = ContinuousClock()
     @ObservationIgnored private let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "hearsay", category: "session")
 
-    init(directory: URL? = nil) {
+    init(directory: URL? = nil, defaults: UserDefaults = .standard) {
+        settings = Settings(defaults: defaults)
         let support =
             directory
             ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -388,6 +389,14 @@ final class Coordinator {
         settings.polishEngine = polishEngine
     }
 
+    func set(cloudCleanupModel: CloudCleanupModel) {
+        settings.cloudCleanupModel = cloudCleanupModel
+    }
+
+    func set(ollamaModel: String?) {
+        settings.ollamaModel = ollamaModel
+    }
+
     func set(polish: PolishMode) {
         settings.polish = polish
     }
@@ -553,7 +562,15 @@ final class Coordinator {
         }()
         let polish = settings.polish
         let polishEngine: PolishEngine =
-            (settings.polishEngine == .openRouter && KeyStore.value("OPENROUTER_API_KEY") != nil) ? .openRouter : .onDevice
+            settings.polishEngine == .openRouter && KeyStore.value("OPENROUTER_API_KEY") == nil ? .onDevice : settings.polishEngine
+        let polisher: any Polisher
+        switch polishEngine {
+        case .onDevice: polisher = onDevicePolisher
+        case .openRouter:
+            polisher = OpenRouterPolisher(
+                key: KeyStore.value("OPENROUTER_API_KEY") ?? "", model: settings.cloudCleanupModel.rawValue)
+        case .ollama: polisher = OllamaPolisher(model: settings.ollamaModel ?? "")
+        }
         // Field context is read only when the on-device model will use it: it never leaves the Mac.
         let fieldContext =
             (settings.fieldContextEnabled && polish != .off && polishEngine == .onDevice)
@@ -562,7 +579,7 @@ final class Coordinator {
             engine: activeEngine,
             style: StyleInference.style(for: target),
             polish: polish,
-            polishEngine: polishEngine,
+            polisher: polisher,
             fieldContext: fieldContext,
             lexicon: Lexicon.load(from: dictionaryURL)
         )
@@ -735,14 +752,9 @@ final class Coordinator {
             phase = .finishing(session, .polishing)
             overlay.render(.working(FinishingStep.polishing.label))
         }
-        let polisher: any Polisher
-        switch session.rules.polishEngine {
-        case .onDevice: polisher = onDevicePolisher
-        case .openRouter: polisher = OpenRouterPolisher(key: KeyStore.value("OPENROUTER_API_KEY") ?? "")
-        }
         let cleanup = await TextPipeline.finish(
             raw, mode: session.rules.polish, style: session.rules.style,
-            lexicon: session.rules.lexicon, polisher: polisher, fieldContext: session.rules.fieldContext
+            lexicon: session.rules.lexicon, polisher: session.rules.polisher, fieldContext: session.rules.fieldContext
         )
         let delivered = cleanup.delivered
         timing.polish = cleanup.polishDuration

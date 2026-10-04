@@ -17,6 +17,9 @@ fn chat(key: &str, body: Value) -> Result<String, String> {
         let detail = json.pointer("/error/message").and_then(|m| m.as_str()).unwrap_or_default();
         return Err(if status.as_u16() == 402 { format!("OpenRouter: no credits ({detail})") } else { format!("http {status} {detail}") });
     }
+    if json["choices"][0]["finish_reason"] == "length" {
+        return Err("incomplete response".to_string());
+    }
     json["choices"][0]["message"]["content"].as_str().map(String::from).ok_or_else(|| "unexpected response shape".to_string())
 }
 
@@ -49,16 +52,14 @@ impl Transcriber for OpenRouterTranscriber {
     }
 }
 
-/// Cloud polish through OpenRouter, guarded like every polisher. Opt-in: the field context and
-/// dictionary terms travel with the prompt, so this is only offered when no local model exists.
+/// Cloud polish through OpenRouter. Only transcript and dictionary terms travel with the prompt.
 pub struct OpenRouterPolisher {
     model: String,
     key: String,
 }
 
 impl OpenRouterPolisher {
-    /// The same model the Mac app's cloud cleanup uses: dense, structured rewrites of long dictations.
-    pub const DEFAULT_MODEL: &'static str = "google/gemini-3.7-flash";
+    pub const DEFAULT_MODEL: &'static str = "z-ai/glm-5.3-flash";
 
     pub fn new(key: String) -> Self {
         Self::with_model(Self::DEFAULT_MODEL, key)
@@ -71,14 +72,20 @@ impl OpenRouterPolisher {
 
 impl Polisher for OpenRouterPolisher {
     fn polish(&self, spoken: &str, style: WritingStyle, intensity: PolishIntensity, context: &PolishContext) -> PolishVerdict {
-        let body = json!({
+        let cloud_context = PolishContext { field_text: None, terms: context.terms.clone() };
+        let mut body = json!({
             "model": self.model,
             "temperature": 0,
             "messages": [
                 {"role": "system", "content": polish::instructions(style, intensity)},
-                {"role": "user", "content": polish::prompt(spoken, context)}
+                {"role": "user", "content": polish::prompt(spoken, &cloud_context)}
             ]
         });
+        if self.model == Self::DEFAULT_MODEL {
+            body["max_tokens"] = json!(2048usize.max(spoken.split_whitespace().count() * 3 + 1024));
+            body["reasoning"] = json!({"effort": "low", "exclude": true});
+            body["provider"] = json!({"sort": "throughput", "max_price": {"prompt": 0.15, "completion": 0.50}});
+        }
         match chat(&self.key, body) {
             Ok(candidate) => PolishGuard::verdict(spoken, &candidate),
             Err(e) => PolishVerdict::KeepRaw(PolishRejection::Failed(e)),

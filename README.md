@@ -38,7 +38,7 @@ Push-to-talk dictation, built to beat the cloud subscription apps at their own g
 - **A built-in bake-off lab.** Race every engine against Wispr Flow (or any rival) on identical audio, and get word-error-rate and latency scoreboards, measured honestly.
 
 <p align="center">
-  <img src="docs/macos-dictation.png" width="820" alt="The native macOS Dictation pane: Apple on-device and downloadable speech models">
+  <img src="docs/macos-dictation.framed.png" width="820" alt="The native macOS Dictation pane: Apple on-device and downloadable speech models">
 </p>
 
 ## How to install
@@ -52,7 +52,7 @@ brew install --cask note89/tap/hearsay
 open /Applications/hearsay.app
 ```
 
-Or download `hearsay-0.4.0.zip` from [Releases](https://github.com/note89/hearsay/releases), unzip, and drag `hearsay.app` to `/Applications`. The app is signed with an Apple Developer ID, notarized, and carries its notarization ticket for offline verification.
+Or download `hearsay-0.5.0.zip` from [Releases](https://github.com/note89/hearsay/releases), unzip, and drag `hearsay.app` to `/Applications`. The app is signed with an Apple Developer ID, notarized, and carries its notarization ticket for offline verification.
 
 Menu bar → **Open hearsay…** → **General** shows the permission setup. Click **Enable** for **Microphone**, **Input Monitoring**, and **Accessibility**, granting each when macOS asks. Accessibility enables insertion; without it, finished text goes to the clipboard. Relaunch after granting Input Monitoring when macOS asks.
 
@@ -204,22 +204,22 @@ Everything lives in one window (macOS: menu bar → **Open hearsay…**; Linux a
 | **Dictation** | engine cards, local model downloads, language (only when the engine needs one), permissions |
 | **Cloud providers** (macOS) | optional provider keys, secure Keychain storage, key source and removal; on Linux/Windows, keys live in Dictation |
 | **Dictionary** | your terms (`mprocs`) and rewrites (`mprox => mprocs`) — a plain text file underneath |
-| **Style** | cleanup level with example outputs, and which model does it: on this machine, or Gemini 3.7 Flash via OpenRouter for long, structured rewrites; on macOS the app→tone table |
+| **Style** | cleanup level with example outputs, and which model does it: Apple on-device, configurable OpenRouter cleanup, or Ollama on macOS; on macOS the app→tone table |
 | **Bake-off** | the comparison lab — see below |
 | **History** | recent dictations, recoverable; per-record delete, clear, off-switch |
 | **About** (macOS) | app version, manual update check, releases and Homebrew update instructions |
 
 <p align="center">
-  <img src="docs/macos-style.png" width="820" alt="The native macOS Style pane">
+  <img src="docs/macos-style.framed.png" width="820" alt="The native macOS Style pane">
 </p>
 <p align="center">
-  <img src="docs/macos-dictionary.png" width="820" alt="The native macOS Dictionary pane">
+  <img src="docs/macos-dictionary.framed.png" width="820" alt="The native macOS Dictionary pane">
 </p>
 
 On macOS, the listening bar is a compact microphone and level meter. Hover for a live transcript or processing details; click a result to read its full message. An orange cloud icon marks a cloud session, and a checkered flag marks a comparison. General → **Show bar preview** lets you position it without recording: drag the grip to dim the displays and reveal the **bottom**, **left** and **right** drop zones. The target under the pointer lights up. Release in a zone to dock; release elsewhere or press **Esc** to return to the saved position.
 
 <p align="center">
-  <img src="docs/macos-docking.png" width="820" alt="The dimmed macOS docking overlay with bottom, left and right drop zones">
+  <img src="docs/macos-docking.framed.png" width="820" alt="The dimmed macOS docking overlay with bottom, left and right drop zones">
 </p>
 
 ## Engines
@@ -240,6 +240,14 @@ Gemini 3.5 Transcribe is the one cloud engine that streams: audio goes up while 
 
 Which to pick: on macOS, start with Apple or download Qwen for English, Swedish and Portuguese; compare Cohere for its supported languages and Redux for a compact download. On Linux and Windows, base.en is the small English option and large-v3-turbo adds multilingual recognition. An OpenRouter key also unlocks cloud cleanup on Linux and Windows. Gemini 3.5 Transcribe is the cloud streaming option.
 
+### Cleanup models
+
+On macOS, **Style → Cleanup model** lets you choose Apple on-device, OpenRouter, or Ollama. Apple remains the default. OpenRouter defaults to **GLM 5.3 Flash** for inexpensive cleanup, with low thinking and fast provider routing capped at the displayed token prices. **Gemini 3.8 Flash** (low thinking) and **Gemini 3.5 Flash-Lite** (minimal thinking) are selectable alternatives. Cloud cleanup receives only the transcript and dictionary terms; it never receives text around your cursor. See the [sample cleanup comparison](docs/cleanup-models.md) for measured timings and actual outputs.
+
+For **Ollama** (macOS), start your Ollama server, select Ollama in Style, refresh the model list, then choose an installed instruction model. The picker shows model sizes so you can choose a small model. Hearsay connects to `localhost:11434`, disables thinking, and keeps the model loaded for 10 minutes. Local Ollama models work offline without API charges; Ollama cloud models use their provider. If Ollama is unavailable or cleanup fails, Hearsay keeps the raw transcript. Field context is never sent to Ollama.
+
+Recorded benchmarks also accept `"polishEngine": "ollama"` with `"polishModel"` set to an installed model name. Linux and Windows use GLM 5.3 Flash as the cloud cleanup default; their audio transcription engine is unchanged.
+
 ### API keys
 
 Only the cloud engines need a key. On macOS, enter a key in **Cloud providers** and save it securely in the login Keychain. Keys are resolved from the Keychain, process environment, `keys.env`, then `~/.zshrc`. The pane shows where a key was found and lets you remove a saved key without displaying it. Removing a Keychain entry can reveal an existing environment or file key. On Linux and Windows, the Dictation pane saves keys to `keys.env`, readable only by you; keys are resolved from the process environment, that file, then supported shell profiles.
@@ -255,7 +263,7 @@ Data folder: macOS `~/Library/Application Support/hearsay`, Linux `~/.local/shar
 ## Privacy, precisely
 
 - Local engines: audio, transcript, field context — nothing leaves the machine.
-- Cleanup runs on-device by default on macOS. The cloud cleanup model (OpenRouter) is opt-in, on every platform, and receives exactly the transcript and your dictionary terms: field context is never read when the cloud model is selected, so nothing from your screen leaves the machine. Choose a local speech engine and on-device cleanup (or Off) to keep the entire dictation local.
+- Cleanup runs on-device by default on macOS. Cloud cleanup (OpenRouter) is opt-in, on every platform, and receives exactly the transcript and your dictionary terms: field context is never read when the cloud model is selected, so nothing from your screen leaves the machine. Choose a local speech engine and Apple on-device cleanup, a local Ollama model, or Off to keep the entire dictation local.
 - Secure (password) fields: on macOS dictation is blocked before the microphone even starts. Linux and Windows cannot detect them; a dictated password would land in History, so pause History first.
 - The system log gets timings and outcomes, never content. History is 0600, clearable, optional. Clipboard writes are marked transient on macOS so clipboard managers skip them.
 - Cloud engines upload exactly one thing: the utterance audio, to the provider you picked.
@@ -265,7 +273,7 @@ Data folder: macOS `~/Library/Application Support/hearsay`, Linux `~/.local/shar
 ## The bake-off
 
 <p align="center">
-  <img src="docs/macos-bakeoff.png" width="820" alt="The native macOS Bake-off pane: engine lineup and script prompter">
+  <img src="docs/macos-bakeoff.framed.png" width="820" alt="The native macOS Bake-off pane: engine lineup and script prompter">
 </p>
 
 Open the **Bake-off** pane, run Wispr Flow alongside, tick the engines to race, and read the ten script sentences (English with numbers and jargon, one Swedish, two svengelska, one Portuguese). Every ticked engine hears the same audio from the same key-up, each on its own clock; hearsay never inserts while the pane is front — it watches the pane's text box for the rival's output and scores everything against the on-screen sentence: word-level diffs, WER (numeral style, units, ordinals and contractions never count as errors), latency, a leaderboard, and each engine's record against the rival.
@@ -291,7 +299,7 @@ Choose `sequential`, `hybrid` (cloud engines together, then local engines one at
 - **Field context** (macOS, default on): ~600 chars around your cursor go to the *on-device* cleanup model as terminology reference — the accuracy trick cloud apps upload your screen for, done locally.
 - **Dictionary**: terms bias the cleanup toward exact spellings (and become custom vocabulary for engines that take one); `from => to` rewrites apply deterministically even with cleanup off. Nothing is ever learned behind your back.
 
-For a fully local workflow with Wispr Flow-style cleanup on macOS, choose a local Dictation engine and **Style → On this Mac**. **Light** handles punctuation, capitalization, fillers and explicit self-corrections while keeping the wording. **Full** also tightens phrasing and structures paragraphs and lists according to the target app. Apple's Foundation Models framework performs this pass on-device; it requires Apple Intelligence to be enabled and its model available. Language support depends on the installed OS and model. If cleanup is unavailable, fails, times out or fails Hearsay's meaning-drift check, Hearsay keeps the raw transcription and applies your dictionary rewrites. It does not fall back to cloud cleanup.
+For a fully local workflow with Wispr Flow-style cleanup on macOS, choose a local Dictation engine and **Style → Apple on-device**. **Light** handles punctuation, capitalization, fillers and explicit self-corrections while keeping the wording. **Full** also tightens phrasing and structures paragraphs and lists according to the target app. Apple's Foundation Models framework performs this pass on-device; it requires Apple Intelligence to be enabled and its model available. Language support depends on the installed OS and model. If cleanup is unavailable, fails, times out or fails Hearsay's meaning-drift check, Hearsay keeps the raw transcription and applies your dictionary rewrites. It does not fall back to cloud cleanup.
 
 ## Build from source
 
@@ -309,8 +317,8 @@ To produce a distributable release on the Mac holding the Developer ID private k
 
 ```sh
 # First set and commit the version in Resources/Info.plist.
-scripts/release.sh 0.4.0             # build, sign, notarize, staple, verify, archive
-scripts/release.sh 0.4.0 --publish   # clean tree required; draft, tag, CI checks, publish
+scripts/release.sh 0.5.0             # build, sign, notarize, staple, verify, archive
+scripts/release.sh 0.5.0 --publish   # clean tree required; draft, tag, CI checks, publish
 ```
 
 The default notarization credentials are the `devid-notary` keychain profile. `HEARSAY_SIGN_IDENTITY` and `HEARSAY_NOTARY_PROFILE` override the signing identity and profile. Credentials never leave the Keychain. `scripts/verify-release.sh build/hearsay.app --notarized` verifies the app identity, arm64 architecture, hardened runtime, microphone entitlement, stapled ticket and Gatekeeper acceptance. The archive and SHA-256 file land in `build/`. The crossplatform workflow attaches its archives to the staged release after its build and NixOS checks pass; it never creates or publishes a release itself. Update the Homebrew tap's version and checksum after publishing.
@@ -343,8 +351,8 @@ Tests: `cargo test --workspace`. Engine smoke test on a file: `hearsay-rs transc
 - **"copied — press Ctrl+V" every time.** That's Wayland: the text is on your clipboard, paste it. XWayland apps (many Electron apps) still receive the paste.
 - **"microphone: no input device" on Linux.** ALSA sees no capture device. With PipeWire, `pipewire-alsa` (or `pipewire-pulse` + `alsa-plugins`) provides the `default` device; `arecord -l` should list something.
 - **Engine says "needs key".** On macOS, save the key in Cloud providers. On Linux/Windows, paste it in Dictation, or export it in your shell profile and restart hearsay.
-- **Cleanup kept the raw text.** The log says why (`kept raw (timeout|failed|…)`). Long dictations take the on-device model 20 s or more; the cloud model does them in 2 s. "OpenRouter: no credits" means the balance at https://openrouter.ai/settings/credits is empty.
-- **Cleanup output is loose on long dictations.** That's the on-device model's ceiling. Style → Cleanup model → Cloud, with an OpenRouter key, gives Wispr-grade rewrites: paragraphs, lists, fixed product names.
+- **Cleanup kept the raw text.** The log says why (`kept raw (timeout|failed|…)`). Cleanup latency depends on the model and dictation length; choose a small Ollama model or GLM 5.3 Flash for lower-cost cleanup. "OpenRouter: no credits" means the balance at https://openrouter.ai/settings/credits is empty.
+- **Cleanup output is loose on long dictations.** That's the on-device model's ceiling. Style → Cleanup model → Cloud, with an OpenRouter key, enables structured rewrites: paragraphs, lists, fixed product names.
 - **macOS keeps asking for permissions after a rebuild.** Use the Developer ID identity consistently, or run `scripts/fix-permissions.sh` once on a development Mac without it. Moving from an older self-signed release to the Developer ID release may require granting permissions once again.
 - **Windows SmartScreen blocks the exe.** More info → Run anyway. The binary is built by GitHub Actions from this repository.
 

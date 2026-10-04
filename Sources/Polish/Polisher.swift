@@ -46,8 +46,7 @@ public enum PolishVerdict: Sendable {
     case keepRaw(PolishRejection)
 }
 
-/// On-device reference material for a polish pass. Never uploaded: the polish model runs locally
-/// regardless of which transcription engine produced the spoken text.
+/// Reference material for cleanup. External polishers discard field text at their boundary.
 public struct PolishContext: Sendable {
     public let fieldText: String?
     public let terms: [String]

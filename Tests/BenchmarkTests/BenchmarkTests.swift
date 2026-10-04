@@ -215,3 +215,21 @@ func schedulerKeepsDiskModelsSerialAndReturnsConfigurationOrder(_ mode: Benchmar
     if mode == .hybrid { #expect(await probe.hybridOverlap == false) }
     if mode == .parallel { #expect(await probe.hybridOverlap) }
 }
+
+@Test func ollamaBenchmarkConfigurationRequiresAnExplicitModel() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+    defer { try? FileManager.default.removeItem(at: file) }
+    for model in [String?.none, "", "qwen3:1.7b"] {
+        let config = BenchmarkConfiguration(
+            schemaVersion: 1, repetitions: 1, pacing: .realtime, execution: .sequential,
+            pipelines: [BenchmarkPipeline(id: "ollama", engine: .appleLocal, polish: .full, polishEngine: .ollama, polishModel: model)])
+        try JSONEncoder().encode(config).write(to: file)
+        if let model, !model.isEmpty {
+            let loaded = try BenchmarkConfiguration.load(at: file)
+            #expect(loaded.pipelines[0].polishEngine == .ollama)
+            #expect(loaded.pipelines[0].polishModel == model)
+        } else {
+            #expect(throws: BenchmarkError.self) { try BenchmarkConfiguration.load(at: file) }
+        }
+    }
+}

@@ -55,5 +55,6 @@ let package = Package(
         .testTarget(name: "TranscriptionTests", dependencies: ["Transcription"]),
         .testTarget(name: "UtteranceTests", dependencies: ["Utterance"]),
         .testTarget(name: "HearsayAppTests", dependencies: ["hearsay"]),
+        .testTarget(name: "PolishTests", dependencies: ["Polish"]),
     ]
 )

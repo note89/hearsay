@@ -52,9 +52,11 @@ public enum BenchmarkRunner {
         for pipeline in configuration.pipelines {
             if case .local(let model) = pipeline.engine { versions[model.wireKey] = model.repositoryID + "@" + model.revision }
             if pipeline.polish != .off {
-                versions[pipeline.id + "/cleanup"] =
-                    pipeline.polishEngine == .openRouter
-                    ? (pipeline.polishModel ?? OpenRouterPolisher.defaultModel) : "apple-foundation-models"
+                switch pipeline.polishEngine {
+                case .onDevice: versions[pipeline.id + "/cleanup"] = "apple-foundation-models"
+                case .openRouter: versions[pipeline.id + "/cleanup"] = pipeline.polishModel ?? OpenRouterPolisher.defaultModel
+                case .ollama: versions[pipeline.id + "/cleanup"] = "ollama/" + (pipeline.polishModel ?? "")
+                }
             }
         }
         for style in Set(suite.cases.map(\.style)) {
@@ -103,12 +105,18 @@ public enum BenchmarkRunner {
             await residency.loaded(local.model)
         }
         let polisher: any Polisher
-        if pipeline.polish != .off, pipeline.polishEngine == .openRouter {
+        switch pipeline.polishEngine {
+        case .openRouter where pipeline.polish != .off:
             guard let key = KeyStore.value("OPENROUTER_API_KEY") else {
                 throw BenchmarkError("BenchmarkRunner.measure: OPENROUTER_API_KEY missing for cleanup")
             }
             polisher = OpenRouterPolisher(key: key, model: pipeline.polishModel ?? OpenRouterPolisher.defaultModel)
-        } else {
+        case .ollama where pipeline.polish != .off:
+            guard let model = pipeline.polishModel, !model.isEmpty else {
+                throw BenchmarkError("BenchmarkRunner.measure: Ollama cleanup needs polishModel")
+            }
+            polisher = OllamaPolisher(model: model)
+        default:
             polisher = FoundationModelsPolisher()
         }
         let setupMs = (ContinuousClock.now - setup).benchmarkMilliseconds

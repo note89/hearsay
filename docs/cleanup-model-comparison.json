@@ -1,0 +1,194 @@
+[
+  {
+    "caseID" : "correction",
+    "delivered" : "Send the invoice to Alex on Thursday morning",
+    "expected" : "Send the invoice to Alex on Thursday morning",
+    "milliseconds" : 1878,
+    "model" : "z-ai\/glm-5.3-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "technical",
+    "delivered" : "Refactor the parseTranscript function and check the Keycloak integration. The PostgreSQL query takes 250ms and the p99 latency should stay below 500ms.",
+    "expected" : "Refactor the parseTranscript function and check the Keycloak integration. The PostgreSQL query takes 250ms, and the p99 latency should stay below 500ms.",
+    "milliseconds" : 910,
+    "model" : "z-ai\/glm-5.3-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "list",
+    "delivered" : "Before we ship we need three things:\n\n- Fix the login\n- Test the microphone\n- Update the documentation",
+    "expected" : "Before we ship, we need three things:\n- Fix the login.\n- Test the microphone.\n- Update the documentation.",
+    "milliseconds" : 647,
+    "model" : "z-ai\/glm-5.3-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "swedish",
+    "delivered" : "Jag vill att vi testar hela flödet igen, inte bara transkriberingen. Resultatet ska ha rätt skiljetecken och behålla det jag faktiskt menade.",
+    "expected" : "Jag vill att vi testar hela flödet igen, inte bara transkriberingen. Resultatet ska ha rätt skiljetecken och behålla det jag faktiskt menade.",
+    "milliseconds" : 815,
+    "model" : "z-ai\/glm-5.3-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "portuguese",
+    "delivered" : "Olá, podemos mudar a reunião para quinta-feira às 15h? Preciso de confirmar os detalhes primeiro",
+    "expected" : "Olá, podemos mudar a reunião para quinta-feira às 15h? Preciso de confirmar os detalhes primeiro.",
+    "milliseconds" : 460,
+    "model" : "z-ai\/glm-5.3-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "long-request",
+    "delivered" : "It would be nice if we could make a benchmark that can be rerun automatically. Pre-recorded messages of me saying a bunch of stuff, and then we measure. That way we can tweak the whole pipeline to get closer to Wispr Flow, which has good output mostly.\n\nI want to compare the raw transcript and the cleaned-up output separately, so we know which part got better. Also, please keep all the recordings on this machine and let me save a baseline before changing anything.\n\nSuper, go ahead.",
+    "expected" : "It would be nice to make a benchmark that can be rerun automatically using prerecorded messages of me saying a range of things. We can then tweak the whole pipeline to get closer to Wispr Flow, which usually produces good output.\n\nI want to compare the raw transcript and the cleaned output separately so we know which part improved. Please keep all recordings on this machine and let me save a baseline before changing anything. Super, go ahead.",
+    "milliseconds" : 1550,
+    "model" : "z-ai\/glm-5.3-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "correction",
+    "delivered" : "Send the invoice to Alex on Thursday morning",
+    "expected" : "Send the invoice to Alex on Thursday morning",
+    "milliseconds" : 1089,
+    "model" : "google\/gemini-3.8-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "technical",
+    "delivered" : "Refactor the `parseTranscript` function and check the Keycloak integration. \n\nThe PostgreSQL query takes 250ms, and the p99 latency should stay below 500ms.",
+    "expected" : "Refactor the parseTranscript function and check the Keycloak integration. The PostgreSQL query takes 250ms, and the p99 latency should stay below 500ms.",
+    "milliseconds" : 1613,
+    "model" : "google\/gemini-3.8-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "list",
+    "delivered" : "Before we ship, we need three things:\n- Fix the login.\n- Test the microphone.\n- Update the documentation.",
+    "expected" : "Before we ship, we need three things:\n- Fix the login.\n- Test the microphone.\n- Update the documentation.",
+    "milliseconds" : 1416,
+    "model" : "google\/gemini-3.8-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "swedish",
+    "delivered" : "Jag vill att vi testar hela flödet igen, inte bara transkriberingen. Resultatet ska ha rätt skiljetecken och behålla det jag faktiskt menade.",
+    "expected" : "Jag vill att vi testar hela flödet igen, inte bara transkriberingen. Resultatet ska ha rätt skiljetecken och behålla det jag faktiskt menade.",
+    "milliseconds" : 998,
+    "model" : "google\/gemini-3.8-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "portuguese",
+    "delivered" : "Olá, podemos mudar a reunião para quinta-feira às 15h? Preciso de confirmar os detalhes primeiro",
+    "expected" : "Olá, podemos mudar a reunião para quinta-feira às 15h? Preciso de confirmar os detalhes primeiro.",
+    "milliseconds" : 1021,
+    "model" : "google\/gemini-3.8-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "long-request",
+    "delivered" : "It would be nice to make an automated, repeatable benchmark using pre-recorded audio messages of me speaking so we can measure performance. That way, we can tweak the whole pipeline to perform more like Wispr Flow, which mostly has good output.\n\nI want to compare the raw transcript and the cleaned-up output separately so we know which part improved. Also, please keep all the recordings on this machine and let me save a baseline before changing anything.\n\nSuper, go ahead.",
+    "expected" : "It would be nice to make a benchmark that can be rerun automatically using prerecorded messages of me saying a range of things. We can then tweak the whole pipeline to get closer to Wispr Flow, which usually produces good output.\n\nI want to compare the raw transcript and the cleaned output separately so we know which part improved. Please keep all recordings on this machine and let me save a baseline before changing anything. Super, go ahead.",
+    "milliseconds" : 1087,
+    "model" : "google\/gemini-3.8-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "correction",
+    "delivered" : "Send the invoice to Alex on Thursday morning.",
+    "expected" : "Send the invoice to Alex on Thursday morning",
+    "milliseconds" : 437,
+    "model" : "google\/gemini-3.5-flash-lite",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "technical",
+    "delivered" : "Refactor the parseTranscript function and check the Keycloak integration. \n\nThe PostgreSQL query takes 250ms and the p99 latency should stay below 500ms.",
+    "expected" : "Refactor the parseTranscript function and check the Keycloak integration. The PostgreSQL query takes 250ms, and the p99 latency should stay below 500ms.",
+    "milliseconds" : 530,
+    "model" : "google\/gemini-3.5-flash-lite",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "list",
+    "delivered" : "Before we ship we need three things:\n\n- Fix the login.\n- Test the microphone.\n- Update the documentation.",
+    "expected" : "Before we ship, we need three things:\n- Fix the login.\n- Test the microphone.\n- Update the documentation.",
+    "milliseconds" : 516,
+    "model" : "google\/gemini-3.5-flash-lite",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "swedish",
+    "delivered" : "Jag vill att vi testar hela flödet igen, inte bara transkriberingen. Resultatet ska ha rätt skiljetecken och behålla det jag faktiskt menade.",
+    "expected" : "Jag vill att vi testar hela flödet igen, inte bara transkriberingen. Resultatet ska ha rätt skiljetecken och behålla det jag faktiskt menade.",
+    "milliseconds" : 490,
+    "model" : "google\/gemini-3.5-flash-lite",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "portuguese",
+    "delivered" : "Olá, podemos mudar a reunião para quinta-feira às 15:00? Preciso de confirmar os detalhes primeiro.",
+    "expected" : "Olá, podemos mudar a reunião para quinta-feira às 15h? Preciso de confirmar os detalhes primeiro.",
+    "milliseconds" : 514,
+    "model" : "google\/gemini-3.5-flash-lite",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "long-request",
+    "delivered" : "It would be nice if we could make a benchmark that can be rerun automatically. Pre-recorded messages of me saying a bunch of stuff and then we measure. That way we can tweak the whole pipeline to get more like Wispr Flow which has good output mostly.\n\nI want to compare the raw transcript and the cleaned up output separately so we know which part got better. Also please keep all the recordings on this machine and let me save a baseline before changing anything.\n\nSuper, go ahead.",
+    "expected" : "It would be nice to make a benchmark that can be rerun automatically using prerecorded messages of me saying a range of things. We can then tweak the whole pipeline to get closer to Wispr Flow, which usually produces good output.\n\nI want to compare the raw transcript and the cleaned output separately so we know which part improved. Please keep all recordings on this machine and let me save a baseline before changing anything. Super, go ahead.",
+    "milliseconds" : 744,
+    "model" : "google\/gemini-3.5-flash-lite",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "correction",
+    "delivered" : "Send the invoice to Alex on Thursday morning",
+    "expected" : "Send the invoice to Alex on Thursday morning",
+    "milliseconds" : 1846,
+    "model" : "google\/gemini-3.7-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "technical",
+    "delivered" : "Refactor the parseTranscript function and check the Keycloak integration. The PostgreSQL query takes 250ms and the p99 latency should stay below 500ms.",
+    "expected" : "Refactor the parseTranscript function and check the Keycloak integration. The PostgreSQL query takes 250ms, and the p99 latency should stay below 500ms.",
+    "milliseconds" : 3558,
+    "model" : "google\/gemini-3.7-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "list",
+    "delivered" : "Before we ship, we need three things:\n- Fix the login.\n- Test the microphone.\n- Update the documentation.",
+    "expected" : "Before we ship, we need three things:\n- Fix the login.\n- Test the microphone.\n- Update the documentation.",
+    "milliseconds" : 4117,
+    "model" : "google\/gemini-3.7-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "swedish",
+    "delivered" : "Jag vill att vi testar hela flödet igen, inte bara transkriberingen. Resultatet ska ha rätt skiljetecken och behålla det jag faktiskt menade.",
+    "expected" : "Jag vill att vi testar hela flödet igen, inte bara transkriberingen. Resultatet ska ha rätt skiljetecken och behålla det jag faktiskt menade.",
+    "milliseconds" : 3747,
+    "model" : "google\/gemini-3.7-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "portuguese",
+    "delivered" : "Olá, podemos mudar a reunião para quinta-feira às 15h? Preciso de confirmar os detalhes primeiro",
+    "expected" : "Olá, podemos mudar a reunião para quinta-feira às 15h? Preciso de confirmar os detalhes primeiro.",
+    "milliseconds" : 4070,
+    "model" : "google\/gemini-3.7-flash",
+    "verdict" : "accepted"
+  },
+  {
+    "caseID" : "long-request",
+    "delivered" : "It would be nice to create a benchmark that can be rerun automatically using prerecorded messages of me speaking, and then measure the results. That way, we can tweak the whole pipeline to get closer to Wispr Flow, which mostly has good output.\n\nI want to compare the raw transcript and the cleaned-up output separately so we know which part improved. Also, please keep all the recordings on this machine and let me save a baseline before changing anything.\n\nSuper, go ahead.",
+    "expected" : "It would be nice to make a benchmark that can be rerun automatically using prerecorded messages of me saying a range of things. We can then tweak the whole pipeline to get closer to Wispr Flow, which usually produces good output.\n\nI want to compare the raw transcript and the cleaned output separately so we know which part improved. Please keep all recordings on this machine and let me save a baseline before changing anything. Super, go ahead.",
+    "milliseconds" : 5611,
+    "model" : "google\/gemini-3.7-flash",
+    "verdict" : "accepted"
+  }
+]

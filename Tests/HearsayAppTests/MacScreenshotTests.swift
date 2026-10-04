@@ -17,7 +17,10 @@ struct MacScreenshotTests {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hearsay-screenshots-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let coordinator = Coordinator(directory: directory)
+        let suite = "MacScreenshotTests.Settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let coordinator = Coordinator(directory: directory, defaults: defaults)
         defer { coordinator.stop() }
         Lexicon.save(
             [.term("Hearsay"), .term("SwiftUI"), .term("mprocs"), .rewrite(from: "mprox", to: "mprocs")],
@@ -32,6 +35,7 @@ struct MacScreenshotTests {
         NSApp.appearance = NSAppearance(named: .darkAqua)
         try checkDockingLifecycle()
         for section in [SettingsSection.general, .dictation, .style, .dictionary, .bakeoff, .history] {
+            coordinator.settings.polishEngine = section == .style ? .openRouter : .onDevice
             let view = SettingsWindowView(coordinator: coordinator, initialSection: section)
             try await capture(
                 view, size: CGSize(width: 1020, height: section == .dictation ? 1160 : 820),
@@ -39,6 +43,12 @@ struct MacScreenshotTests {
                 to: destination.appendingPathComponent("macos-\(section.rawValue.lowercased().replacingOccurrences(of: "-", with: "")).png")
             )
         }
+
+        coordinator.settings.polishEngine = .openRouter
+        try await capture(
+            SettingsWindowView(coordinator: coordinator, initialSection: .style),
+            size: CGSize(width: 1020, height: 820), titled: true, light: true,
+            to: destination.appendingPathComponent("macos-style-light.png"))
 
         let model = OverlayModel()
         model.content = .listening(partial: "")
@@ -98,17 +108,19 @@ struct MacScreenshotTests {
         #expect(NSApp.keyWindow === previousKeyWindow)
     }
 
-    @MainActor private func capture<Content: View>(_ content: Content, size: CGSize, titled: Bool, to url: URL) async throws {
+    @MainActor private func capture<Content: View>(_ content: Content, size: CGSize, titled: Bool, light: Bool = false, to url: URL)
+        async throws
+    {
         let window = NSWindow(
             contentRect: CGRect(origin: .zero, size: size),
             styleMask: titled ? [.titled, .closable, .miniaturizable, .resizable] : [.borderless],
             backing: .buffered, defer: false)
         window.title = "Hearsay"
         window.isReleasedWhenClosed = false
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.isOpaque = titled
+        window.appearance = NSAppearance(named: light ? .aqua : .darkAqua)
+        window.isOpaque = false
         window.backgroundColor = titled ? .windowBackgroundColor : .clear
-        let host = NSHostingView(rootView: content.environment(\.colorScheme, .dark))
+        let host = NSHostingView(rootView: content.environment(\.colorScheme, light ? .light : .dark))
         host.sizingOptions = []
         window.contentView = host
         host.frame = CGRect(origin: .zero, size: size)
@@ -124,11 +136,42 @@ struct MacScreenshotTests {
         configuration.height = Int(window.frame.height * 2)
         configuration.showsCursor = false
         configuration.ignoreShadowsSingleWindow = true
-        configuration.shouldBeOpaque = titled
+        configuration.shouldBeOpaque = false
         print("Capturing \(url.lastPathComponent)")
         let image = try await SCScreenshotManager.captureImage(
             contentFilter: SCContentFilter(desktopIndependentWindow: capturedWindow), configuration: configuration)
         let bitmap = NSBitmapImageRep(cgImage: image)
+        if titled {
+            try #require(bitmap.hasAlpha)
+            try #require((bitmap.colorAt(x: 0, y: 0)?.alphaComponent ?? 1) < 0.01, "Window corners must be transparent.")
+        }
+        try #require(bitmap.representation(using: .png, properties: [:])).write(to: url)
+        if titled || url.lastPathComponent == "macos-docking.png" {
+            try writePresentation(image, to: url.deletingPathExtension().appendingPathExtension("framed.png"))
+        }
+    }
+
+    @MainActor private func writePresentation(_ image: CGImage, to url: URL) throws {
+        let margin = 96
+        let width = image.width + margin * 2
+        let height = image.height + margin * 2
+        let context = try #require(
+            CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let bounds = CGRect(x: 0, y: 0, width: width, height: height)
+        context.addPath(CGPath(roundedRect: bounds, cornerWidth: 40, cornerHeight: 40, transform: nil))
+        context.clip()
+        context.setFillColor(NSColor(calibratedRed: 0x16 / 255, green: 0x18 / 255, blue: 0x1d / 255, alpha: 1).cgColor)
+        context.fill(bounds)
+        context.setStrokeColor(NSColor(calibratedRed: 0x2f / 255, green: 0x33 / 255, blue: 0x3b / 255, alpha: 1).cgColor)
+        context.setLineWidth(1)
+        context.addPath(CGPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), cornerWidth: 40, cornerHeight: 40, transform: nil))
+        context.strokePath()
+        context.setShadow(offset: CGSize(width: 0, height: -2), blur: 0, color: NSColor.black.withAlphaComponent(0.2).cgColor)
+        context.draw(image, in: CGRect(x: margin, y: margin, width: image.width, height: image.height))
+        let bitmap = NSBitmapImageRep(cgImage: try #require(context.makeImage()))
+        try #require((bitmap.colorAt(x: 0, y: 0)?.alphaComponent ?? 1) < 0.01)
         try #require(bitmap.representation(using: .png, properties: [:])).write(to: url)
     }
 }
