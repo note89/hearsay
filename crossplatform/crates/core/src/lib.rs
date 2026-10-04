@@ -8,6 +8,8 @@ pub mod keystore;
 pub mod lexicon;
 pub mod paths;
 pub mod polish;
+#[cfg(test)]
+mod properties;
 pub mod scorer;
 pub mod session;
 pub mod wav;

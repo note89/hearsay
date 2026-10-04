@@ -47,7 +47,11 @@ pub fn diff(reference: &str, hypothesis: &str) -> Vec<DiffSegment> {
         .into_iter()
         .enumerate()
         .map(|(index, text)| DiffSegment {
-            verdict: if bad.contains(&index) { DiffVerdict::Wrong } else { DiffVerdict::Match },
+            verdict: if bad.contains(&index) {
+                DiffVerdict::Wrong
+            } else {
+                DiffVerdict::Match
+            },
             text,
         })
         .collect()
@@ -63,7 +67,10 @@ static ORDINAL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\d+)(st|nd|rd|
 static DIGIT_UNIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\d+)([a-z]+)$").unwrap());
 
 fn normalize_token(raw: &str) -> Vec<String> {
-    let mut token = raw.to_lowercase().replace(['\u{2019}', '\u{02BC}'], "'").replace('%', " percent ");
+    let mut token = raw
+        .to_lowercase()
+        .replace(['\u{2019}', '\u{02BC}'], "'")
+        .replace('%', " percent ");
     // "1,250" → "1250" (the regex crate has no lookahead; loop handles "1,250,000")
     loop {
         let next = DIGIT_COMMA.replace_all(&token, "$1$2").into_owned();
@@ -124,17 +131,27 @@ pub fn number_words(n: u64) -> String {
     if n < 100 {
         let tens = TENS[n / 10];
         let rest = n % 10;
-        return if rest == 0 { tens.to_string() } else { format!("{tens} {}", ONES[rest]) };
+        return if rest == 0 {
+            tens.to_string()
+        } else {
+            format!("{tens} {}", ONES[rest])
+        };
     }
     let hundreds = format!("{} hundred", ONES[n / 100]);
     let rest = n % 100;
-    if rest == 0 { hundreds } else { format!("{hundreds} {}", number_words(rest as u64)) }
+    if rest == 0 {
+        hundreds
+    } else {
+        format!("{hundreds} {}", number_words(rest as u64))
+    }
 }
 
 pub fn ordinal_words(n: u64) -> String {
     let words = number_words(n);
     let mut parts: Vec<&str> = words.split(' ').collect();
-    let Some(last) = parts.pop() else { return n.to_string() };
+    let Some(last) = parts.pop() else {
+        return n.to_string();
+    };
     let ordinal = match ORDINALS.get(last) {
         Some(special) => (*special).to_string(),
         None if last.ends_with('y') => format!("{}ieth", &last[..last.len() - 1]),
@@ -145,20 +162,28 @@ pub fn ordinal_words(n: u64) -> String {
     out.join(" ")
 }
 
-fn edit_distance(a: &[String], b: &[String]) -> usize {
+pub(crate) fn edit_distance(a: &[String], b: &[String]) -> usize {
     let mut previous: Vec<usize> = (0..=b.len()).collect();
     for i in 1..=a.len() {
         let mut current = vec![i];
         for j in 1..=b.len() {
             let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            current.push((previous[j] + 1).min(current[j - 1] + 1).min(previous[j - 1] + cost));
+            current.push(
+                (previous[j] + 1)
+                    .min(current[j - 1] + 1)
+                    .min(previous[j - 1] + cost),
+            );
         }
         previous = current;
     }
     previous[b.len()]
 }
 
-fn bad_hypothesis_tokens(reference: &[String], hypothesis: &[String], source: &[usize]) -> HashSet<usize> {
+fn bad_hypothesis_tokens(
+    reference: &[String],
+    hypothesis: &[String],
+    source: &[usize],
+) -> HashSet<usize> {
     let n = reference.len();
     let m = hypothesis.len();
     let mut dp = vec![vec![0usize; m + 1]; n + 1];
@@ -170,15 +195,25 @@ fn bad_hypothesis_tokens(reference: &[String], hypothesis: &[String], source: &[
     }
     for i in 1..=n {
         for j in 1..=m {
-            let cost = if reference[i - 1] == hypothesis[j - 1] { 0 } else { 1 };
-            dp[i][j] = (dp[i - 1][j] + 1).min(dp[i][j - 1] + 1).min(dp[i - 1][j - 1] + cost);
+            let cost = if reference[i - 1] == hypothesis[j - 1] {
+                0
+            } else {
+                1
+            };
+            dp[i][j] = (dp[i - 1][j] + 1)
+                .min(dp[i][j - 1] + 1)
+                .min(dp[i - 1][j - 1] + cost);
         }
     }
     let mut bad = HashSet::new();
     let (mut i, mut j) = (n, m);
     while i > 0 || j > 0 {
         if i > 0 && j > 0 {
-            let cost = if reference[i - 1] == hypothesis[j - 1] { 0 } else { 1 };
+            let cost = if reference[i - 1] == hypothesis[j - 1] {
+                0
+            } else {
+                1
+            };
             if dp[i][j] == dp[i - 1][j - 1] + cost {
                 if cost == 1 {
                     bad.insert(source[j - 1]);
@@ -242,11 +277,104 @@ fn split_letter_digit_boundaries(token: &str) -> Vec<String> {
     parts
 }
 
-const ONES: [&str; 21] = ["zero","one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen","twenty"];
-const TENS: [&str; 10] = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
-static ORDINALS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| HashMap::from([("one","first"),("two","second"),("three","third"),("five","fifth"),("eight","eighth"),("nine","ninth"),("twelve","twelfth"),("twenty","twentieth")]));
-static UNITS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| HashMap::from([("ms","milliseconds"),("s","seconds"),("min","minutes"),("h","hours"),("km","kilometers"),("kg","kilograms"),("gb","gigabytes"),("mb","megabytes"),("kb","kilobytes"),("hz","hertz"),("khz","kilohertz"),("mhz","megahertz"),("ghz","gigahertz"),("pm","pm"),("am","am")]));
-static CONTRACTIONS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| HashMap::from([("won't","will not"),("can't","can not"),("don't","do not"),("doesn't","does not"),("didn't","did not"),("isn't","is not"),("aren't","are not"),("wasn't","was not"),("weren't","were not"),("haven't","have not"),("hasn't","has not"),("hadn't","had not"),("wouldn't","would not"),("shouldn't","should not"),("couldn't","could not"),("i'm","i am"),("i've","i have"),("i'll","i will"),("i'd","i would"),("you're","you are"),("you've","you have"),("you'll","you will"),("they're","they are"),("they've","they have"),("they'll","they will"),("we're","we are"),("we've","we have"),("we'll","we will"),("it's","it is"),("that's","that is"),("there's","there is"),("let's","let us"),("what's","what is"),("who's","who is"),("he's","he is"),("she's","she is"),("here's","here is")]));
+const ONES: [&str; 21] = [
+    "zero",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+    "twenty",
+];
+const TENS: [&str; 10] = [
+    "", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+];
+static ORDINALS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+    HashMap::from([
+        ("one", "first"),
+        ("two", "second"),
+        ("three", "third"),
+        ("five", "fifth"),
+        ("eight", "eighth"),
+        ("nine", "ninth"),
+        ("twelve", "twelfth"),
+        ("twenty", "twentieth"),
+    ])
+});
+static UNITS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+    HashMap::from([
+        ("ms", "milliseconds"),
+        ("s", "seconds"),
+        ("min", "minutes"),
+        ("h", "hours"),
+        ("km", "kilometers"),
+        ("kg", "kilograms"),
+        ("gb", "gigabytes"),
+        ("mb", "megabytes"),
+        ("kb", "kilobytes"),
+        ("hz", "hertz"),
+        ("khz", "kilohertz"),
+        ("mhz", "megahertz"),
+        ("ghz", "gigahertz"),
+        ("pm", "pm"),
+        ("am", "am"),
+    ])
+});
+static CONTRACTIONS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+    HashMap::from([
+        ("won't", "will not"),
+        ("can't", "can not"),
+        ("don't", "do not"),
+        ("doesn't", "does not"),
+        ("didn't", "did not"),
+        ("isn't", "is not"),
+        ("aren't", "are not"),
+        ("wasn't", "was not"),
+        ("weren't", "were not"),
+        ("haven't", "have not"),
+        ("hasn't", "has not"),
+        ("hadn't", "had not"),
+        ("wouldn't", "would not"),
+        ("shouldn't", "should not"),
+        ("couldn't", "could not"),
+        ("i'm", "i am"),
+        ("i've", "i have"),
+        ("i'll", "i will"),
+        ("i'd", "i would"),
+        ("you're", "you are"),
+        ("you've", "you have"),
+        ("you'll", "you will"),
+        ("they're", "they are"),
+        ("they've", "they have"),
+        ("they'll", "they will"),
+        ("we're", "we are"),
+        ("we've", "we have"),
+        ("we'll", "we will"),
+        ("it's", "it is"),
+        ("that's", "that is"),
+        ("there's", "there is"),
+        ("let's", "let us"),
+        ("what's", "what is"),
+        ("who's", "who is"),
+        ("he's", "he is"),
+        ("she's", "she is"),
+        ("here's", "here is"),
+    ])
+});
 
 #[cfg(test)]
 mod tests {
@@ -258,17 +386,32 @@ mod tests {
 
     #[test]
     fn style_variants_are_free() {
-        zero("their deployment won't work there", "their deployment will not work there");
+        zero(
+            "their deployment won't work there",
+            "their deployment will not work there",
+        );
         zero("we enabled HTTP/2 today", "we enabled HTTP2 today");
         zero("the p99 latency spiked", "the p 99 latency spiked");
-        zero("totals €1,250 plus 23% VAT", "totals 1250 plus 23 percent VAT");
+        zero(
+            "totals €1,250 plus 23% VAT",
+            "totals 1250 plus 23 percent VAT",
+        );
         zero("plus 23% VAT", "plus twenty three percent VAT");
         zero("bring 29 items", "bring twenty nine items");
         zero("wait 5ms then retry", "wait five milliseconds then retry");
-        zero("spiked to 250ms after", "spiked to two hundred fifty milliseconds after");
-        zero("the 2nd option on the 14th", "the second option on the fourteenth");
+        zero(
+            "spiked to 250ms after",
+            "spiked to two hundred fifty milliseconds after",
+        );
+        zero(
+            "the 2nd option on the 14th",
+            "the second option on the fourteenth",
+        );
         zero("music from the 90's era", "music from the 90's era");
-        zero("their deployment won't work there", "their deployment won\u{2019}t work there");
+        zero(
+            "their deployment won't work there",
+            "their deployment won\u{2019}t work there",
+        );
         zero("before Thursday's demo", "before Thursday\u{2019}s demo");
         zero("say hello now", "say 'hello' now");
         zero("hello", "' hello");
@@ -277,21 +420,45 @@ mod tests {
     #[test]
     fn real_errors_count() {
         assert!(wer("the cache is stale", "the cash is stale") > 0.0);
-        assert!(wer("refactor the parseTranscript function", "refactor the parse transcript function") > 0.0);
+        assert!(
+            wer(
+                "refactor the parseTranscript function",
+                "refactor the parse transcript function"
+            ) > 0.0
+        );
         assert!(wer("the cache is stale", "the cache stale") > 0.0);
     }
 
     #[test]
     fn diff_agrees_with_wer() {
-        for (r, h) in [("wait 5ms for HTTP/2", "wait five milliseconds for HTTP2"), ("plus 23% VAT", "plus twenty three percent VAT"), ("the 2nd option", "the second option"), ("the 90's", "the 90's")] {
+        for (r, h) in [
+            ("wait 5ms for HTTP/2", "wait five milliseconds for HTTP2"),
+            ("plus 23% VAT", "plus twenty three percent VAT"),
+            ("the 2nd option", "the second option"),
+            ("the 90's", "the 90's"),
+        ] {
             assert_eq!(wer(r, h), 0.0);
-            assert!(diff(r, h).iter().all(|s| s.verdict == DiffVerdict::Match), "{r}");
+            assert!(
+                diff(r, h).iter().all(|s| s.verdict == DiffVerdict::Match),
+                "{r}"
+            );
         }
-        let marked: Vec<String> = diff("the cache is stale", "the cash is stale").into_iter().filter(|s| s.verdict == DiffVerdict::Wrong).map(|s| s.text).collect();
+        let marked: Vec<String> = diff("the cache is stale", "the cash is stale")
+            .into_iter()
+            .filter(|s| s.verdict == DiffVerdict::Wrong)
+            .map(|s| s.text)
+            .collect();
         assert_eq!(marked, vec!["cash".to_string()]);
-        let pct: Vec<String> = diff("fifty", "50%").into_iter().filter(|s| s.verdict == DiffVerdict::Wrong).map(|s| s.text).collect();
+        let pct: Vec<String> = diff("fifty", "50%")
+            .into_iter()
+            .filter(|s| s.verdict == DiffVerdict::Wrong)
+            .map(|s| s.text)
+            .collect();
         assert_eq!(pct, vec!["50%".to_string()]);
-        let joined: String = diff("a list: one two", "a list:\n- one\n- two").into_iter().map(|s| s.text).collect();
+        let joined: String = diff("a list: one two", "a list:\n- one\n- two")
+            .into_iter()
+            .map(|s| s.text)
+            .collect();
         assert_eq!(joined, "a list:\n- one\n- two");
     }
 

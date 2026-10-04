@@ -72,28 +72,80 @@ public enum TextPipeline {
         return CleanupResult(delivered: delivered, rejection: rejection, polishDuration: duration)
     }
 
-    private static func within(_ limit: Duration, work: @escaping () async -> PolishVerdict) async -> PolishVerdict {
+    static func within(_ limit: Duration, work: @escaping () async -> PolishVerdict) async -> PolishVerdict {
         let completion = CleanupCompletion()
-        return await withCheckedContinuation { continuation in
-            let worker = Task { completion.resume(continuation, with: await work()) }
-            Task {
-                try? await Task.sleep(for: limit)
-                completion.resume(continuation, with: .keepRaw(.timeout))
-                worker.cancel()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard completion.install(continuation) else { return }
+                let worker = Task {
+                    guard !Task.isCancelled else { return }
+                    completion.resolve(await work())
+                }
+                completion.track(worker)
+                let timer = Task {
+                    do { try await Task.sleep(for: limit) } catch { return }
+                    completion.resolve(.keepRaw(.timeout))
+                }
+                completion.track(timer)
             }
+        } onCancel: {
+            completion.resolve(.keepRaw(.cancelled))
         }
     }
 }
 
 private final class CleanupCompletion: @unchecked Sendable {
-    private let lock = NSLock()
-    private var finished = false
+    private enum State {
+        case pending
+        case waiting(CheckedContinuation<PolishVerdict, Never>)
+        case completed(PolishVerdict)
+    }
 
-    func resume(_ continuation: CheckedContinuation<PolishVerdict, Never>, with verdict: PolishVerdict) {
+    private let lock = NSLock()
+    private var state = State.pending
+    private var tasks: [Task<Void, Never>] = []
+
+    func install(_ continuation: CheckedContinuation<PolishVerdict, Never>) -> Bool {
         lock.lock()
-        defer { lock.unlock() }
-        guard !finished else { return }
-        finished = true
-        continuation.resume(returning: verdict)
+        switch state {
+        case .pending:
+            state = .waiting(continuation)
+            lock.unlock()
+            return true
+        case .completed(let verdict):
+            lock.unlock()
+            continuation.resume(returning: verdict)
+            return false
+        case .waiting:
+            lock.unlock()
+            preconditionFailure("CleanupCompletion.install: continuation already installed")
+        }
+    }
+
+    func track(_ task: Task<Void, Never>) {
+        lock.lock()
+        if case .completed = state {
+            lock.unlock()
+            task.cancel()
+        } else {
+            tasks.append(task)
+            lock.unlock()
+        }
+    }
+
+    func resolve(_ verdict: PolishVerdict) {
+        lock.lock()
+        if case .completed = state {
+            lock.unlock()
+            return
+        }
+        let continuation: CheckedContinuation<PolishVerdict, Never>?
+        if case .waiting(let waiting) = state { continuation = waiting } else { continuation = nil }
+        state = .completed(verdict)
+        let pendingTasks = tasks
+        tasks.removeAll()
+        lock.unlock()
+        for task in pendingTasks { task.cancel() }
+        continuation?.resume(returning: verdict)
     }
 }

@@ -313,6 +313,8 @@ scripts/bundle.sh && open build/hearsay.app
 
 Local builds prefer the same Developer ID as releases, then `hearsay-dev`, and finally ad-hoc signing when neither certificate is available. On a Mac without a Developer ID, `scripts/fix-permissions.sh` creates the stable development certificate so permission grants survive rebuilds. Every build uses the hardened runtime and microphone entitlement. Tests: `scripts/test.sh` and `swift run bakeoff-tests`. The test script supports both Command Line Tools and Xcode. The prebuilt native app targets Apple Silicon.
 
+[Design verification](formal/README.md) describes the TLA+ models, Lean scorer proofs, cross-port differential checks, and algebraic tests. Run `bash scripts/check-models.sh`, `bash scripts/check-differential.sh`, or `LEAN="$(bash scripts/fetch-lean.sh)" bash scripts/check-lean.sh`; property and boundary tests run with the normal Swift and Rust suites.
+
 To produce a distributable release on the Mac holding the Developer ID private key:
 
 ```sh
