@@ -46,33 +46,34 @@ public enum Scorer {
 
     static func normalizeToken(_ raw: String) -> [String] {
         var token = raw.lowercased()
-        token = token.replacingOccurrences(of: "\u{2019}", with: "'")   // typographic apostrophes: engines emit them
+        token = token.replacingOccurrences(of: "\u{2019}", with: "'")  // typographic apostrophes: engines emit them
         token = token.replacingOccurrences(of: "\u{02BC}", with: "'")
         token = token.replacingOccurrences(of: "%", with: " percent ")
         token = regexReplace(token, pattern: #"(\d),(?=\d)"#, template: "$1")
         token = regexReplace(token, pattern: #"[^\p{L}\p{N}\s']"#, template: " ")
         let pieces = token.split(whereSeparator: \.isWhitespace).map(String.init)
         if pieces.count != 1 { return pieces.flatMap { normalizeToken($0) } }
-        let t = pieces[0].trimmingCharacters(in: CharacterSet(charactersIn: "'"))   // contractions need interior apostrophes only
+        let t = pieces[0].trimmingCharacters(in: CharacterSet(charactersIn: "'"))  // contractions need interior apostrophes only
         if t.isEmpty { return [] }
         if let expansion = Self.contractions[t] { return expansion.split(separator: " ").map(String.init) }
-        if t.allSatisfy(\.isNumber), let n = Int(t) { return numberWords(n).split(separator: " ").map(String.init) }
-        if let match = firstMatch(t, pattern: #"^(\d+)(st|nd|rd|th)$"#), let n = Int(match[1]) {
+        if t.allSatisfy(\.isNumber), let n = UInt64(t) { return numberWords(n).split(separator: " ").map(String.init) }
+        if let match = firstMatch(t, pattern: #"^(\d+)(st|nd|rd|th)$"#), let n = UInt64(match[1]) {
             return ordinalWords(n).split(separator: " ").map(String.init)
         }
-        if let match = firstMatch(t, pattern: #"^(\d+)([a-z]+)$"#), let unit = Self.units[match[2]], let n = Int(match[1]) {
+        if let match = firstMatch(t, pattern: #"^(\d+)([a-z]+)$"#), let unit = Self.units[match[2]], let n = UInt64(match[1]) {
             return numberWords(n).split(separator: " ").map(String.init) + [unit]
         }
         if let unit = Self.units[t] { return [unit] }
         if t.contains(where: \.isLetter) && t.contains(where: \.isNumber) {
             let parts = splitLetterDigitBoundaries(t)
-            if parts.count > 1 { return parts.flatMap { normalizeToken($0) } }   // guard: never recurse on an unsplit token
+            if parts.count > 1 { return parts.flatMap { normalizeToken($0) } }  // guard: never recurse on an unsplit token
         }
         return [t]
     }
 
-    static func numberWords(_ n: Int) -> String {
-        if n < 0 || n >= 1000 { return String(n) }
+    static func numberWords(_ value: UInt64) -> String {
+        if value >= 1000 { return String(value) }
+        let n = Int(value)
         if n <= 20 { return Self.ones[n] }
         if n < 100 {
             let tens = Self.tens[n / 10] ?? String(n / 10)
@@ -81,10 +82,10 @@ public enum Scorer {
         }
         let hundreds = "\(Self.ones[n / 100]) hundred"
         let rest = n % 100
-        return rest == 0 ? hundreds : "\(hundreds) \(numberWords(rest))"
+        return rest == 0 ? hundreds : "\(hundreds) \(numberWords(UInt64(rest)))"
     }
 
-    static func ordinalWords(_ n: Int) -> String {
+    static func ordinalWords(_ n: UInt64) -> String {
         var words = numberWords(n).split(separator: " ").map(String.init)
         guard let last = words.popLast() else { return String(n) }
         let ordinal: String
@@ -100,7 +101,7 @@ public enum Scorer {
 
     // MARK: - Alignment
 
-    private static func editDistance(_ a: [String], _ b: [String]) -> Int {
+    static func editDistance(_ a: [String], _ b: [String]) -> Int {
         var previous = Array(0...b.count)
         for i in 1...max(a.count, 1) where !a.isEmpty {
             var current = [i]
@@ -116,25 +117,29 @@ public enum Scorer {
     }
 
     private static func badHypothesisTokens(ref: [String], hyp: [String], sourceIndex: [Int]) -> Set<Int> {
-        let n = ref.count, m = hyp.count
+        let n = ref.count
+        let m = hyp.count
         var dp = Array(repeating: Array(repeating: 0, count: m + 1), count: n + 1)
         for i in 0...n { dp[i][0] = i }
         for j in 0...m { dp[0][j] = j }
         if n > 0 && m > 0 {
             for i in 1...n {
                 for j in 1...m {
-                    dp[i][j] = min(dp[i-1][j] + 1, dp[i][j-1] + 1, dp[i-1][j-1] + (ref[i-1] == hyp[j-1] ? 0 : 1))
+                    dp[i][j] = min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (ref[i - 1] == hyp[j - 1] ? 0 : 1))
                 }
             }
         }
         var bad = Set<Int>()
-        var i = n, j = m
+        var i = n
+        var j = m
         while i > 0 || j > 0 {
-            if i > 0 && j > 0 && dp[i][j] == dp[i-1][j-1] + (ref[i-1] == hyp[j-1] ? 0 : 1) {
-                if ref[i-1] != hyp[j-1] { bad.insert(sourceIndex[j-1]) }
-                i -= 1; j -= 1
-            } else if j > 0 && dp[i][j] == dp[i][j-1] + 1 {
-                bad.insert(sourceIndex[j-1]); j -= 1
+            if i > 0 && j > 0 && dp[i][j] == dp[i - 1][j - 1] + (ref[i - 1] == hyp[j - 1] ? 0 : 1) {
+                if ref[i - 1] != hyp[j - 1] { bad.insert(sourceIndex[j - 1]) }
+                i -= 1
+                j -= 1
+            } else if j > 0 && dp[i][j] == dp[i][j - 1] + 1 {
+                bad.insert(sourceIndex[j - 1])
+                j -= 1
             } else {
                 i -= 1
             }
@@ -174,7 +179,7 @@ public enum Scorer {
                 parts.append(current)
                 current = String(character)
             }
-            if character.isLetter || character.isNumber { lastIsDigit = isDigit }   // punctuation must not mask a boundary
+            if character.isLetter || character.isNumber { lastIsDigit = isDigit }  // punctuation must not mask a boundary
         }
         if !current.isEmpty { parts.append(current) }
         return parts
@@ -187,16 +192,35 @@ public enum Scorer {
 
     private static func firstMatch(_ text: String, pattern: String) -> [String]? {
         guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) else { return nil }
+            let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text))
+        else { return nil }
         return (0..<match.numberOfRanges).map { index in
             guard let range = Range(match.range(at: index), in: text) else { return "" }
             return String(text[range])
         }
     }
 
-    private static let ones = ["zero","one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen","twenty"]
-    private static let tens = [2:"twenty",3:"thirty",4:"forty",5:"fifty",6:"sixty",7:"seventy",8:"eighty",9:"ninety"]
-    private static let ordinals = ["one":"first","two":"second","three":"third","five":"fifth","eight":"eighth","nine":"ninth","twelve":"twelfth","twenty":"twentieth"]
-    private static let units = ["ms":"milliseconds","s":"seconds","min":"minutes","h":"hours","km":"kilometers","kg":"kilograms","gb":"gigabytes","mb":"megabytes","kb":"kilobytes","hz":"hertz","khz":"kilohertz","mhz":"megahertz","ghz":"gigahertz","pm":"pm","am":"am"]
-    private static let contractions = ["won't":"will not","can't":"can not","don't":"do not","doesn't":"does not","didn't":"did not","isn't":"is not","aren't":"are not","wasn't":"was not","weren't":"were not","haven't":"have not","hasn't":"has not","hadn't":"had not","wouldn't":"would not","shouldn't":"should not","couldn't":"could not","i'm":"i am","i've":"i have","i'll":"i will","i'd":"i would","you're":"you are","you've":"you have","you'll":"you will","they're":"they are","they've":"they have","they'll":"they will","we're":"we are","we've":"we have","we'll":"we will","it's":"it is","that's":"that is","there's":"there is","let's":"let us","what's":"what is","who's":"who is","he's":"he is","she's":"she is","here's":"here is"]
+    private static let ones = [
+        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen",
+        "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+    ]
+    private static let tens = [2: "twenty", 3: "thirty", 4: "forty", 5: "fifty", 6: "sixty", 7: "seventy", 8: "eighty", 9: "ninety"]
+    private static let ordinals = [
+        "one": "first", "two": "second", "three": "third", "five": "fifth", "eight": "eighth", "nine": "ninth", "twelve": "twelfth",
+        "twenty": "twentieth",
+    ]
+    private static let units = [
+        "ms": "milliseconds", "s": "seconds", "min": "minutes", "h": "hours", "km": "kilometers", "kg": "kilograms", "gb": "gigabytes",
+        "mb": "megabytes", "kb": "kilobytes", "hz": "hertz", "khz": "kilohertz", "mhz": "megahertz", "ghz": "gigahertz", "pm": "pm",
+        "am": "am",
+    ]
+    private static let contractions = [
+        "won't": "will not", "can't": "can not", "don't": "do not", "doesn't": "does not", "didn't": "did not", "isn't": "is not",
+        "aren't": "are not", "wasn't": "was not", "weren't": "were not", "haven't": "have not", "hasn't": "has not", "hadn't": "had not",
+        "wouldn't": "would not", "shouldn't": "should not", "couldn't": "could not", "i'm": "i am", "i've": "i have", "i'll": "i will",
+        "i'd": "i would", "you're": "you are", "you've": "you have", "you'll": "you will", "they're": "they are", "they've": "they have",
+        "they'll": "they will", "we're": "we are", "we've": "we have", "we'll": "we will", "it's": "it is", "that's": "that is",
+        "there's": "there is", "let's": "let us", "what's": "what is", "who's": "who is", "he's": "he is", "she's": "she is",
+        "here's": "here is",
+    ]
 }

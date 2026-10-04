@@ -17,6 +17,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "Utterance"),
+        .target(name: "Sessions"),
         .target(name: "Audio"),
         .target(
             name: "Transcription",
@@ -47,7 +48,8 @@ let package = Package(
         .executableTarget(
             name: "hearsay",
             dependencies: [
-                "Utterance", "Audio", "Transcription", "Polish", "Insertion", "History", "Overlay", "Bakeoff", "Lexicon", "Pipeline",
+                "Utterance", "Sessions", "Audio", "Transcription", "Polish", "Insertion", "History", "Overlay", "Bakeoff", "Lexicon",
+                "Pipeline",
             ]
         ),
         .testTarget(name: "BenchmarkTests", dependencies: ["Benchmark", "Pipeline", "Transcription", "Polish", "Lexicon"]),
@@ -56,5 +58,7 @@ let package = Package(
         .testTarget(name: "UtteranceTests", dependencies: ["Utterance"]),
         .testTarget(name: "HearsayAppTests", dependencies: ["hearsay"]),
         .testTarget(name: "PolishTests", dependencies: ["Polish"]),
+        .testTarget(
+            name: "PropertyTests", dependencies: ["Bakeoff", "Lexicon", "Polish", "Pipeline", "Transcription", "Utterance", "Sessions"]),
     ]
 )

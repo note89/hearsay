@@ -27,6 +27,7 @@ public enum PolishRejection: Equatable, Sendable {
     case empty
     case meaningDrift
     case timeout
+    case cancelled
     case failed(String)
 
     /// Case name only — safe for logs; `failed`'s payload may echo prompt content.
@@ -36,6 +37,7 @@ public enum PolishRejection: Equatable, Sendable {
         case .empty: return "empty"
         case .meaningDrift: return "meaningDrift"
         case .timeout: return "timeout"
+        case .cancelled: return "cancelled"
         case .failed: return "failed"
         }
     }
@@ -79,7 +81,7 @@ public enum PolishGuard {
 
         let spokenWords = contentWords(spoken)
         let candidateWords = contentWords(cleaned)
-        guard !spokenWords.isEmpty, !candidateWords.isEmpty else { return .accept(PolishedText(text: cleaned)) }
+        guard !spokenWords.isEmpty, !candidateWords.isEmpty else { return .keepRaw(.meaningDrift) }
 
         let spokenSet = Set(spokenWords)
         let candidateSet = Set(candidateWords)
@@ -97,7 +99,7 @@ public enum PolishGuard {
     ]
 
     static func contentWords(_ text: String) -> [String] {
-        text.lowercased()
+        text.lowercased().precomposedStringWithCanonicalMapping
             .split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "'" })
             .map(String.init)
             .filter { !fillers.contains($0) }

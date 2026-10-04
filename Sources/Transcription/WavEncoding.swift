@@ -9,7 +9,8 @@ struct WavAccumulator {
     private static let bytesPerFrame = UInt32(channelCount) * UInt32(bitsPerSample) / 8
     private static let riffChunkHeaderBytes: UInt32 = 36
 
-    private let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: WavAccumulator.sampleRate, channels: 1, interleaved: true)!
+    private let target = AVAudioFormat(
+        commonFormat: .pcmFormatInt16, sampleRate: WavAccumulator.sampleRate, channels: 1, interleaved: true)!
     private var converter: AudioBufferConverter?
 
     private var samples = Data()
@@ -22,6 +23,12 @@ struct WavAccumulator {
         }
     }
 
+    /// Flush the resampler's delayed tail before handing an utterance to a cloud engine.
+    mutating func finish() throws {
+        guard let out = try converter?.finish(), out.frameLength > 0, let channel = out.int16ChannelData?[0] else { return }
+        samples.append(Data(bytes: channel, count: Int(out.frameLength) * Int(Self.bytesPerFrame)))
+    }
+
     func wavData() -> Data {
         func le16(_ value: UInt16) -> Data { withUnsafeBytes(of: value.littleEndian) { Data($0) } }
         func le32(_ value: UInt32) -> Data { withUnsafeBytes(of: value.littleEndian) { Data($0) } }
@@ -31,12 +38,12 @@ struct WavAccumulator {
         data.append(le32(Self.riffChunkHeaderBytes + UInt32(samples.count)))
         data.append("WAVE".data(using: .ascii)!)
         data.append("fmt ".data(using: .ascii)!)
-        data.append(le32(16))                                   // fmt chunk size
+        data.append(le32(16))  // fmt chunk size
         data.append(le16(Self.pcmFormatTag))
         data.append(le16(Self.channelCount))
         data.append(le32(UInt32(Self.sampleRate)))
         data.append(le32(byteRate))
-        data.append(le16(UInt16(Self.bytesPerFrame)))           // block align
+        data.append(le16(UInt16(Self.bytesPerFrame)))  // block align
         data.append(le16(Self.bitsPerSample))
         data.append("data".data(using: .ascii)!)
         data.append(le32(UInt32(samples.count)))

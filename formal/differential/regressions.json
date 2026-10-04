@@ -1,0 +1,15 @@
+[
+  {"reference":"","hypothesis":"","rewrites":[]},
+  {"reference":"one","hypothesis":"one two three four","rewrites":[]},
+  {"reference":"we are 5 milliseconds late","hypothesis":"We’re 5ms late.","rewrites":[]},
+  {"reference":"http two","hypothesis":"HTTP2","rewrites":[]},
+  {"reference":"é ação é","hypothesis":"é ação é","rewrites":[]},
+  {"reference":"um uh","hypothesis":"launch the missiles","rewrites":[]},
+  {"reference":"send invoice","hypothesis":"... uh","rewrites":[]},
+  {"reference":"cache","hypothesis":"CACHE","rewrites":[{"from":"cache","to":"$1\\value"}]},
+  {"reference":"foo","hypothesis":"foo","rewrites":[{"from":"foo","to":"bar"},{"from":"bar","to":"baz"}]},
+  {"reference":"number","hypothesis":"0009223372036854775808th","rewrites":[]},
+  {"reference":"number","hypothesis":"00018446744073709551615ms","rewrites":[]},
+  {"reference":"1,250,000\n3\né","hypothesis":"h é 250,000 h h","rewrites":[]},
+  {"reference":"ação é","hypothesis":"ação é","rewrites":[]}
+]

@@ -9,6 +9,7 @@ import Observation
 import Overlay
 import Pipeline
 import Polish
+import Sessions
 import Transcription
 import Utterance
 import os
@@ -108,7 +109,7 @@ struct Contender {
 }
 
 @MainActor
-final class LiveSession {
+final class LiveSession: SessionIdentity {
     let token: UUID
     let rules: SessionRules
     let plan: SessionPlan
@@ -143,12 +144,7 @@ final class LiveSession {
     }
 }
 
-enum Phase {
-    case idle
-    case listening(LiveSession)
-    case finishing(LiveSession, FinishingStep)
-    case settled(SessionOutcome)
-}
+typealias Phase = SessionPhase<LiveSession, FinishingStep, SessionOutcome>
 
 struct OperationTimeout: Error {}
 
@@ -330,10 +326,7 @@ final class Coordinator {
     func resetBarPosition() { overlay.resetPosition() }
 
     var sessionInFlight: Bool {
-        switch phase {
-        case .listening, .finishing: return true
-        case .idle, .settled: return false
-        }
+        phase.isInFlight
     }
 
     var shortcutChangePending: Bool {
@@ -536,7 +529,7 @@ final class Coordinator {
             return
         case .idle, .settled: break
         }
-        guard !settings.dictationPaused else { return }
+        guard isRunning, !settings.dictationPaused else { return }
         refreshPermissions()
         guard permissionReport.microphone else {
             settle(.failed(reason: "allow microphone in Hearsay settings", salvaged: nil, app: "—"))
@@ -661,7 +654,7 @@ final class Coordinator {
             }
         }
         let step: FinishingStep = session.contenders.count > 1 ? .racing(session.contenders.count) : .transcribing
-        phase = .finishing(session, step)
+        guard phase.release(to: step) != nil else { return }
         overlay.render(.working(step.label))
         log.notice("released: partial length \(session.partial.count)")
         finishTask = Task { await finish(session) }
@@ -712,7 +705,7 @@ final class Coordinator {
     }
 
     private func finish(_ session: LiveSession) async {
-        guard !Task.isCancelled, isRunning else { return }
+        guard phase.canComplete(session.token, running: isRunning, cancelled: Task.isCancelled) else { return }
         switch session.plan {
         case .dictate(let destination): await finishDictation(session, into: destination)
         case .bakeoff(let target, let expected, let runID, let takeID):
@@ -729,7 +722,7 @@ final class Coordinator {
             let limit = session.rules.engine.transcriptionLimit(audioDuration: session.transcriptionLimit)
             raw = try await Self.value(of: session.contenders[0].transcription, within: limit)
         } catch {
-            guard !Task.isCancelled, isRunning else { return }
+            guard phase.canComplete(session.token, running: isRunning, cancelled: Task.isCancelled) else { return }
             session.rivalWatch?.cancel()
             log.error("finish: transcription failed: \(String(describing: error))")
             var salvaged: String?
@@ -737,19 +730,19 @@ final class Coordinator {
                 salvaged = session.partial
                 Inserter.copyToClipboard(session.partial)
             }
-            settle(.failed(reason: "transcription failed", salvaged: salvaged, app: session.appName))
+            settle(.failed(reason: "transcription failed", salvaged: salvaged, app: session.appName), from: session.token)
             return
         }
-        guard !Task.isCancelled, isRunning else { return }
+        guard phase.canComplete(session.token, running: isRunning, cancelled: Task.isCancelled) else { return }
         timing.transcribe = clock.now - transcribeStart
         guard !raw.text.isEmpty else {
             session.rivalWatch?.cancel()
-            settle(.nothingHeard)
+            settle(.nothingHeard, from: session.token)
             return
         }
 
         if session.rules.polish != .off {
-            phase = .finishing(session, .polishing)
+            guard phase.advance(session.token, to: .polishing) else { return }
             overlay.render(.working(FinishingStep.polishing.label))
         }
         let cleanup = await TextPipeline.finish(
@@ -761,9 +754,9 @@ final class Coordinator {
         if let rejection = cleanup.rejection {
             log.notice("finish: kept raw (\(rejection.label, privacy: .public))")
         }
-        guard !Task.isCancelled, isRunning else { return }
+        guard phase.canComplete(session.token, running: isRunning, cancelled: Task.isCancelled) else { return }
 
-        phase = .finishing(session, .inserting)
+        guard phase.advance(session.token, to: .inserting) else { return }
         overlay.render(.working(FinishingStep.inserting.label))
         let insertStart = clock.now
         let outcome: InsertionOutcome
@@ -771,12 +764,13 @@ final class Coordinator {
         case .field(let target): outcome = await Inserter.insert(delivered.text, into: target)
         case .clipboardOnly: outcome = Inserter.copyToClipboard(delivered.text, because: .noFrontmostApp)
         }
+        guard phase.canComplete(session.token, running: isRunning, cancelled: Task.isCancelled) else { return }
         timing.insert = clock.now - insertStart
         lastTiming = timing
         log.notice(
             "session: transcribe \(timing.transcribe.milliseconds) ms · polish \(timing.polish.milliseconds) ms · insert \(timing.insert.milliseconds) ms · \(Self.summary(of: outcome), privacy: .public)"
         )
-        settle(.landed(outcome, delivered, timing, app: session.appName))
+        settle(.landed(outcome, delivered, timing, app: session.appName), from: session.token)
     }
 
     /// Every contender is scored on its raw text, each on its own clock from key-up; the rival on
@@ -806,17 +800,17 @@ final class Coordinator {
             }
             for await entry in group { results.append((entry.0, entry.1)) }
         }
-        guard !Task.isCancelled, isRunning else { return }
+        guard phase.canComplete(session.token, running: isRunning, cancelled: Task.isCancelled) else { return }
         results.sort { $0.index < $1.index }
 
-        phase = .finishing(session, .watchingRival)
+        guard phase.advance(session.token, to: .watchingRival) else { return }
         overlay.render(.working(FinishingStep.watchingRival.label))
         let rival: RivalObservation
         switch target {
         case .watchable: rival = await session.rivalWatch?.value ?? .unobservable
         case .unobservable: rival = .unobservable
         }
-        guard !Task.isCancelled, isRunning else { return }
+        guard phase.canComplete(session.token, running: isRunning, cancelled: Task.isCancelled) else { return }
         let take = Take(
             id: takeID.uuidString, app: session.appName, expected: expected, rival: RivalOutcome(rival), results: results.map(\.result))
         if runID == bakeoff.runID {
@@ -831,12 +825,21 @@ final class Coordinator {
         log.notice(
             "bakeoff: raced \(take.results.count) · fastest \(fastest?.ms.milliseconds ?? -1) ms · rival \(Self.summary(of: rival), privacy: .public)"
         )
-        settle(.compared(RaceOutcome(fastest: fastest, rival: rival, app: session.appName)))
+        settle(.compared(RaceOutcome(fastest: fastest, rival: rival, app: session.appName)), from: session.token)
+    }
+
+    private func settle(_ outcome: SessionOutcome, from token: UUID) {
+        guard phase.complete(token, with: outcome, running: isRunning, cancelled: Task.isCancelled) else { return }
+        showSettlement(outcome)
     }
 
     private func settle(_ outcome: SessionOutcome) {
         guard isRunning else { return }
         phase = .settled(outcome)
+        showSettlement(outcome)
+    }
+
+    private func showSettlement(_ outcome: SessionOutcome) {
         if pendingEngineRefresh {
             pendingEngineRefresh = false
             activateEngine()

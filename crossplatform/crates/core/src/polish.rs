@@ -2,6 +2,7 @@
 //! integrity protector — a model may clean and densify, never invent or answer.
 
 use std::collections::HashSet;
+use unicode_normalization::UnicodeNormalization;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum WritingStyle {
@@ -67,7 +68,13 @@ pub struct PolishContext {
 }
 
 pub trait Polisher: Send + Sync {
-    fn polish(&self, spoken: &str, style: WritingStyle, intensity: PolishIntensity, context: &PolishContext) -> PolishVerdict;
+    fn polish(
+        &self,
+        spoken: &str,
+        style: WritingStyle,
+        intensity: PolishIntensity,
+        context: &PolishContext,
+    ) -> PolishVerdict;
 }
 
 /// DECISION_POLISH_GUARD: polish may delete fillers, re-punctuate and rephrase; it may not invent
@@ -89,13 +96,22 @@ impl PolishGuard {
         let spoken_words = content_words(spoken);
         let candidate_words = content_words(cleaned);
         if spoken_words.is_empty() || candidate_words.is_empty() {
-            return PolishVerdict::Accept(PolishedText(cleaned.to_string()));
+            return PolishVerdict::KeepRaw(PolishRejection::MeaningDrift);
         }
         let spoken_set: HashSet<&String> = spoken_words.iter().collect();
         let candidate_set: HashSet<&String> = candidate_words.iter().collect();
-        let invented = candidate_words.iter().filter(|w| !spoken_set.contains(w)).count() as f64 / candidate_words.len() as f64;
-        let kept = spoken_words.iter().filter(|w| candidate_set.contains(w)).count() as f64 / spoken_words.len() as f64;
-        let grew = candidate_words.len() as f64 > Self::MAX_LENGTH_RATIO * spoken_words.len() as f64 + Self::LENGTH_SLACK_WORDS;
+        let invented = candidate_words
+            .iter()
+            .filter(|w| !spoken_set.contains(w))
+            .count() as f64
+            / candidate_words.len() as f64;
+        let kept = spoken_words
+            .iter()
+            .filter(|w| candidate_set.contains(w))
+            .count() as f64
+            / spoken_words.len() as f64;
+        let grew = candidate_words.len() as f64
+            > Self::MAX_LENGTH_RATIO * spoken_words.len() as f64 + Self::LENGTH_SLACK_WORDS;
         if invented > Self::MAX_INVENTED_SHARE || kept < Self::MIN_KEPT_SHARE || grew {
             return PolishVerdict::KeepRaw(PolishRejection::MeaningDrift);
         }
@@ -103,10 +119,15 @@ impl PolishGuard {
     }
 }
 
-const FILLERS: [&str; 23] = ["um","uh","uhm","hmm","mm","like","so","okay","ok","yeah","eh","öh","öhm","hm","liksom","typ","alltså","ba","tipo","né","então","hã","ãh"];
+const FILLERS: [&str; 23] = [
+    "um", "uh", "uhm", "hmm", "mm", "like", "so", "okay", "ok", "yeah", "eh", "öh", "öhm", "hm",
+    "liksom", "typ", "alltså", "ba", "tipo", "né", "então", "hã", "ãh",
+];
 
 fn content_words(text: &str) -> Vec<String> {
     text.to_lowercase()
+        .nfc()
+        .collect::<String>()
         .split(|c: char| !c.is_alphanumeric() && c != '\'')
         .filter(|w| !w.is_empty() && !FILLERS.contains(w))
         .map(String::from)
@@ -167,8 +188,23 @@ mod tests {
 
     #[test]
     fn guard_accepts_cleanup_and_rejects_invention() {
-        assert!(matches!(PolishGuard::verdict("um so send the, send the invoice by friday", "Send the invoice by Friday."), PolishVerdict::Accept(_)));
-        assert!(matches!(PolishGuard::verdict("send the invoice", "Sure! Here is a summary of your quarterly financial obligations and a plan."), PolishVerdict::KeepRaw(PolishRejection::MeaningDrift)));
-        assert!(matches!(PolishGuard::verdict("send the invoice", "   "), PolishVerdict::KeepRaw(PolishRejection::Empty)));
+        assert!(matches!(
+            PolishGuard::verdict(
+                "um so send the, send the invoice by friday",
+                "Send the invoice by Friday."
+            ),
+            PolishVerdict::Accept(_)
+        ));
+        assert!(matches!(
+            PolishGuard::verdict(
+                "send the invoice",
+                "Sure! Here is a summary of your quarterly financial obligations and a plan."
+            ),
+            PolishVerdict::KeepRaw(PolishRejection::MeaningDrift)
+        ));
+        assert!(matches!(
+            PolishGuard::verdict("send the invoice", "   "),
+            PolishVerdict::KeepRaw(PolishRejection::Empty)
+        ));
     }
 }

@@ -1,0 +1,49 @@
+name: Design models
+
+on:
+  push:
+    branches: [main]
+    paths: ["formal/**", "scripts/check-*.sh", "scripts/check-differential.py", "scripts/fetch-lean.sh", "Sources/Bakeoff/**", "Sources/Lexicon/**", "Sources/Polish/**", "Sources/Pipeline/**", "Sources/Sessions/**", "Sources/Transcription/OneShotWavTranscription.swift", "Sources/Transcription/WavEncoding.swift", "Sources/hearsay/Coordinator.swift", "crossplatform/crates/core/**", "crossplatform/Cargo.lock", ".github/workflows/formal.yml"]
+  pull_request:
+    paths: ["formal/**", "scripts/check-*.sh", "scripts/check-differential.py", "scripts/fetch-lean.sh", "Sources/Bakeoff/**", "Sources/Lexicon/**", "Sources/Polish/**", "Sources/Pipeline/**", "Sources/Sessions/**", "Sources/Transcription/OneShotWavTranscription.swift", "Sources/Transcription/WavEncoding.swift", "Sources/hearsay/Coordinator.swift", "crossplatform/crates/core/**", "crossplatform/Cargo.lock", ".github/workflows/formal.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  model-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Fetch pinned TLC
+        run: |
+          mkdir -p .build/formal
+          curl --fail --location --silent --show-error \
+            https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar \
+            --output .build/formal/tla2tools.jar
+          printf '%s  %s\n' 936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88 \
+            .build/formal/tla2tools.jar | sha256sum --check
+      - name: Check fixed designs and reproduce original counterexamples
+        run: bash scripts/check-models.sh
+
+  cross-port-and-lean:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crossplatform
+      - name: Fetch checksum-pinned Lean compiler
+        run: |
+          command -v zstd || brew install zstd
+          echo "LEAN=$(bash scripts/fetch-lean.sh)" >> "$GITHUB_ENV"
+      - name: Check proofs and compare production ports with the Lean oracle
+        run: bash scripts/check-lean.sh
